@@ -113,7 +113,7 @@ export BIRDCLAW_HOME=/path/to/custom/root
 
 ## Requirements
 
-- Node `25.8.1`
+- Node `25.8.1` or Node 26.x
 - `pnpm`
 - macOS recommended for Spotlight archive discovery
 - `xurl` optional for live reads / writes
@@ -505,11 +505,11 @@ pnpm cli auth status --json
 ## Testing
 
 ```bash
-fnm exec --using 25.8.1 pnpm check
-fnm exec --using 25.8.1 pnpm test
-fnm exec --using 25.8.1 pnpm coverage
-fnm exec --using 25.8.1 pnpm build
-fnm exec --using 25.8.1 pnpm e2e
+pnpm check
+pnpm test
+pnpm coverage
+pnpm build
+pnpm e2e
 ```
 
 Current bar:
