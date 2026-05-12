@@ -30,6 +30,10 @@ import {
 import { syncDirectMessagesViaCachedBird } from "#/lib/dms-live";
 import { listInboxItems, scoreInbox } from "#/lib/inbox";
 import { backfillLinkIndex, searchLinks } from "#/lib/link-index";
+import {
+	fetchTweetMedia,
+	formatMediaFetchResult,
+} from "#/lib/media-fetch";
 import { syncMentionThreads } from "#/lib/mention-threads-live";
 import { exportMentionItems } from "#/lib/mentions-export";
 import {
@@ -127,6 +131,19 @@ function parseNonNegativeIntegerOption(
 		return undefined;
 	}
 
+	return parsed;
+}
+
+function parsePositiveIntegerOption(value: string | undefined, option: string) {
+	const parsed = parseNonNegativeIntegerOption(value, option);
+	if (parsed === undefined) {
+		return undefined;
+	}
+	if (parsed < 1) {
+		printError(`${option} must be at least 1`);
+		process.exitCode = 1;
+		return undefined;
+	}
 	return parsed;
 }
 
@@ -488,6 +505,54 @@ linksCommand
 		});
 		await autoSyncAfterWrite();
 		print(result, program.opts().json ?? false);
+	});
+
+const mediaCommand = program
+	.command("media")
+	.description("Manage the local media cache");
+
+mediaCommand
+	.command("fetch")
+	.description("Fetch missing pbs.twimg.com image media already stored in tweets")
+	.option("--account <accountId>", "Account id")
+	.option("--limit <n>", "Stop after N tweets processed")
+	.option("--kind <kind>", "Tweet or collection kind, e.g. home, like, bookmark")
+	.option("--since <isoDate>", "Only tweets created at or after this date")
+	.option("--parallel <n>", "Concurrent fetch workers, capped at 5", "1")
+	.option("--pacing-ms <n>", "Delay between request starts", "250")
+	.option("--retry-max <n>", "Retries per file after rate limiting", "3")
+	.option("--dry-run", "List what would be fetched without downloading")
+	.option("--json", "Emit JSON output")
+	.action(async (options) => {
+		const limit = parseNonNegativeIntegerOption(options.limit, "--limit");
+		if (options.limit !== undefined && limit === undefined) {
+			return;
+		}
+		const parallel = parsePositiveIntegerOption(options.parallel, "--parallel") ?? 1;
+		const pacingMs = parseNonNegativeIntegerOption(
+			options.pacingMs,
+			"--pacing-ms",
+		) ?? 250;
+		const retryMax = parseNonNegativeIntegerOption(
+			options.retryMax,
+			"--retry-max",
+		) ?? 3;
+		if (process.exitCode) {
+			return;
+		}
+
+		const result = await fetchTweetMedia({
+			account: options.account,
+			limit,
+			kind: options.kind,
+			since: options.since,
+			parallel,
+			pacingMs,
+			retryMax,
+			dryRun: Boolean(options.dryRun),
+		});
+		const asJson = Boolean(program.opts().json || options.json);
+		print(asJson ? result : formatMediaFetchResult(result), asJson);
 	});
 
 program

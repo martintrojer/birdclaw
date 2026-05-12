@@ -114,6 +114,28 @@ Override the root:
 export BIRDCLAW_HOME=/path/to/custom/root
 ```
 
+### Media fetch
+
+`birdclaw media fetch` fills the local originals cache at
+`~/.birdclaw/media/originals` for tweet image URLs already stored in
+`tweets.media_json`.
+
+Legal posture: this is a respectful client-rendering cache, not a scraper. The
+command never enumerates, crawls, or derives Twitter/X CDN URLs. It only fetches
+`pbs.twimg.com` image URLs that birdclaw already has from an archive or API/live
+sync record, skips files that already exist locally, sends a birdclaw user agent,
+paces requests sequentially by default, caps optional parallelism at five, backs
+off on `429`, and relies on the local file cache for idempotency.
+
+Video downloads from `video.twimg.com`, thumbnail generation, and automatic
+invocation from sync commands are intentionally left out. Run it separately,
+for example from cron or launchd every few hours:
+
+```bash
+birdclaw media fetch --json
+birdclaw media fetch --dry-run --limit 20
+```
+
 ## Requirements
 
 - Node `25.8.1` or Node 26.x

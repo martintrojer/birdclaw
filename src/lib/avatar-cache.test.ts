@@ -70,6 +70,10 @@ describe("avatar cache", () => {
 	});
 
 	it("maps cached extension types", () => {
+		const tempDir = mkdtempSync(path.join(os.tmpdir(), "birdclaw-avatar-"));
+		tempDirs.push(tempDir);
+		process.env.BIRDCLAW_HOME = tempDir;
+
 		expect(__test__.getContentTypeFromExtension(".png")).toBe("image/png");
 		expect(__test__.getContentTypeFromExtension(".webp")).toBe("image/webp");
 		expect(__test__.getContentTypeFromExtension(".gif")).toBe("image/gif");
