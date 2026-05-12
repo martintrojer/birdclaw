@@ -171,6 +171,7 @@ function makeRootDataArchive() {
 	const root = mkdtempSync(path.join(os.tmpdir(), "birdclaw-archive-root-"));
 	const archiveDir = path.join(root, "data");
 	mkdirSync(archiveDir, { recursive: true });
+	mkdirSync(path.join(archiveDir, "tweets_media"), { recursive: true });
 
 	writeFileSync(
 		path.join(archiveDir, "account.js"),
@@ -200,6 +201,10 @@ function makeRootDataArchive() {
     }
   }
 ]`,
+	);
+	writeFileSync(
+		path.join(archiveDir, "tweets_media", "rootmedia-archive.jpg"),
+		"root-media",
 	);
 
 	const archivePath = path.join(root, "archive.zip");
@@ -949,9 +954,18 @@ describe("archive import", () => {
 
 		const result = await importArchive(archivePath);
 		const db = getNativeDb();
+		const rootMediaPath = path.join(
+			getBirdclawPaths().mediaOriginalsDir,
+			"archive",
+			"tweets",
+			"rootmedia",
+			"rootmedia-archive.jpg",
+		);
 
 		expect(result.counts.tweets).toBe(1);
 		expect(result.counts.dmMessages).toBe(1);
+		expect(result.counts.mediaFiles.tweets).toBe(1);
+		expect(readFileSync(rootMediaPath, "utf8")).toBe("root-media");
 		expect(
 			(
 				db

@@ -420,7 +420,7 @@ function getArchiveMediaKind(entryPath: string) {
 	const normalized = normalizeArchivePath(entryPath);
 	if (normalized.endsWith("/")) return undefined;
 	return ARCHIVE_MEDIA_DIRECTORIES.find(({ directory }) =>
-		normalized.includes(`/data/${directory}/`),
+		new RegExp(`(?:^|/)data/${directory}/[^/]+$`).test(normalized),
 	);
 }
 
