@@ -62,7 +62,7 @@ Project config:
 birdclaw init
 birdclaw auth status
 birdclaw auth use <transport>
-birdclaw import archive <path>
+birdclaw import archive [path]
 birdclaw sync all
 birdclaw sync tweets
 birdclaw sync authored
@@ -212,24 +212,38 @@ birdclaw backup import ~/Projects/birdclaw-store --json
 birdclaw backup validate ~/Projects/birdclaw-store --json
 ```
 
-### `import archive <path>`
+### `import archive [path]`
 
 - validate archive
 - analyze contents
 - import selected slices
 - parse `data/follower.js` and `data/following.js` into the local follow graph
 - idempotent
+- path is optional; without one, macOS archive autodiscovery picks the newest likely ZIP
 
 Flags:
 
-- `--select <kinds>`
-- `--dm-mode metadata|full`
-- `--dry-run`
-- `--force`
+- `--select <kinds>` — comma-separated subset of `tweets,likes,bookmarks,profiles,directMessages,followers,following`
 
-Default:
+`--select` details:
 
-- DMs import in `full` mode
+- selected re-imports preserve unselected slices
+- valid aliases for `directMessages`: `directmessages`, `direct-messages`, `dms`
+- duplicate names are ignored
+- empty values and unknown names exit as invalid usage
+- selected imports validate that existing `acct_primary` matches the archive account before writing
+- selected imports preserve compatible existing profile rows unless `profiles` is selected
+
+Examples:
+
+```bash
+birdclaw import archive --json
+birdclaw import archive ~/Downloads/twitter-archive.zip --json
+birdclaw import archive ~/Downloads/twitter-archive.zip --select tweets --json
+birdclaw import archive ~/Downloads/twitter-archive.zip --select likes,bookmarks --json
+birdclaw import archive ~/Downloads/twitter-archive.zip --select dms --json
+birdclaw import archive ~/Downloads/twitter-archive.zip --select followers,following --json
+```
 
 ### `sync *`
 

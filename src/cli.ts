@@ -7,7 +7,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { Command } from "commander";
 import { registerModerationCommands } from "#/cli-moderation";
 import { findArchives } from "#/lib/archive-finder";
-import { importArchive } from "#/lib/archive-import";
+import {
+	ARCHIVE_IMPORT_SLICES,
+	type ArchiveImportSlice,
+	importArchive,
+} from "#/lib/archive-import";
 import {
 	AuthoredSyncError,
 	syncAuthoredTweets,
@@ -135,6 +139,55 @@ function parseNonNegativeIntegerOption(
 	return parsed;
 }
 
+function parseArchiveImportSelect(value: string | undefined) {
+	if (value === undefined) {
+		return undefined;
+	}
+
+	const aliases: Record<string, ArchiveImportSlice> = Object.assign(
+		Object.create(null) as Record<string, ArchiveImportSlice>,
+		{
+			tweets: "tweets",
+			likes: "likes",
+			bookmarks: "bookmarks",
+			directmessages: "directMessages",
+			"direct-messages": "directMessages",
+			dms: "directMessages",
+			profiles: "profiles",
+			followers: "followers",
+			following: "following",
+		},
+	);
+	const selected: ArchiveImportSlice[] = [];
+	const seen = new Set<ArchiveImportSlice>();
+	for (const rawItem of value.split(",")) {
+		const item = rawItem.trim();
+		if (!item) continue;
+		const slice = aliases[item] ?? aliases[item.toLowerCase()];
+		if (!slice) {
+			printError(
+				`--select must be a comma-separated subset of ${ARCHIVE_IMPORT_SLICES.join(", ")}`,
+			);
+			process.exitCode = 1;
+			return undefined;
+		}
+		if (!seen.has(slice)) {
+			seen.add(slice);
+			selected.push(slice);
+		}
+	}
+
+	if (selected.length === 0) {
+		printError(
+			`--select must include at least one of ${ARCHIVE_IMPORT_SLICES.join(", ")}`,
+		);
+		process.exitCode = 1;
+		return undefined;
+	}
+
+	return selected;
+}
+
 function resolveActionOptions(options: { transport?: string }) {
 	return {
 		transport: options.transport as ActionsTransport | undefined,
@@ -253,7 +306,15 @@ const importCommand = program
 importCommand
 	.command("archive [archivePath]")
 	.description("Import a Twitter archive into the local SQLite store")
-	.action(async (archivePath) => {
+	.option(
+		"--select <kinds>",
+		`Import only selected archive slices: ${ARCHIVE_IMPORT_SLICES.join(", ")}`,
+	)
+	.action(async (archivePath, options: { select?: string }) => {
+		const select = parseArchiveImportSelect(options.select);
+		if (options.select !== undefined && !select) {
+			return;
+		}
 		let resolvedArchivePath = archivePath;
 		if (!resolvedArchivePath) {
 			const [latestArchive] = await findArchives();
@@ -266,7 +327,7 @@ importCommand
 			);
 		}
 
-		const result = await importArchive(resolvedArchivePath);
+		const result = await importArchive(resolvedArchivePath, { select });
 		await autoSyncAfterWrite();
 		print(result, program.opts().json ?? false);
 	});

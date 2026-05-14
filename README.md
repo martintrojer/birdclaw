@@ -21,6 +21,7 @@ Status: WIP. Real and usable. Not done. Expect schema churn, transport gaps, and
 - FTS5 search over tweets and DMs
 - archive autodiscovery on macOS
 - archive import for tweets, likes, followers/following, profiles, and full DMs
+- selective archive re-imports for one stale slice without wiping the rest of the local store
 - archive import for bookmark exports when present
 - live authored sync through `xurl`, plus likes and bookmarks through `xurl` or `bird`
 - cache-first followers/following sync through `bird` or `xurl`
@@ -166,8 +167,23 @@ Find and import an archive:
 birdclaw archive find --json
 birdclaw import archive --json
 birdclaw import archive ~/Downloads/twitter-archive-2025.zip --json
+```
+
+Optional profile hydration can improve bios, follower counts, and avatars, but it performs live X profile reads and can spend API credits on large archives:
+
+```bash
 birdclaw import hydrate-profiles --json
 ```
+
+Re-import only one part of a newer archive when you already have live or local data you want to keep:
+
+```bash
+birdclaw import archive ~/Downloads/twitter-archive-2026.zip --select tweets --json
+birdclaw import archive ~/Downloads/twitter-archive-2026.zip --select likes,bookmarks --json
+birdclaw import archive ~/Downloads/twitter-archive-2026.zip --select directMessages --json
+```
+
+Valid `--select` slices are `tweets`, `likes`, `bookmarks`, `profiles`, `directMessages`, `followers`, and `following`. `dms` and `direct-messages` are accepted aliases for `directMessages`.
 
 Back up the local SQLite store as canonical JSONL text:
 
