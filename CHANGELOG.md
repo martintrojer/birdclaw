@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.5.1 - 2026-05-15
+
 ### Fixed
 
 - Harden the published CLI wrapper and release checks so the packaged `birdclaw` binary avoids `tsx` CLI IPC startup and stays covered by lint, format, and smoke tests.
