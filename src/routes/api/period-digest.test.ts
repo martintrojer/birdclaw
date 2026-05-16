@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getRouteHandler } from "#/test/route-handlers";
 
@@ -7,9 +8,13 @@ const streamPeriodDigestMock = vi.fn();
 
 vi.mock("#/lib/backup", () => ({
 	maybeAutoUpdateBackup: () => maybeAutoUpdateBackupMock(),
+	maybeAutoUpdateBackupEffect: () =>
+		Effect.promise(() => Promise.resolve(maybeAutoUpdateBackupMock())),
 }));
 vi.mock("#/lib/period-digest", () => ({
 	streamPeriodDigest: (...args: unknown[]) => streamPeriodDigestMock(...args),
+	streamPeriodDigestEffect: (...args: unknown[]) =>
+		Effect.promise(() => streamPeriodDigestMock(...args)),
 }));
 
 import { Route } from "./period-digest";

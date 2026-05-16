@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getRouteHandler } from "#/test/route-handlers";
 
@@ -10,6 +11,8 @@ vi.mock("#/lib/queries", () => ({
 }));
 vi.mock("#/lib/backup", () => ({
 	maybeAutoUpdateBackup: () => maybeAutoUpdateBackupMock(),
+	maybeAutoUpdateBackupEffect: () =>
+		Effect.promise(() => Promise.resolve(maybeAutoUpdateBackupMock())),
 }));
 
 import { Route } from "./query";

@@ -1,7 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { maybeAutoUpdateBackup } from "#/lib/backup";
+import { Effect } from "effect";
+import { maybeAutoUpdateBackupEffect } from "#/lib/backup";
+import { runEffectBackground } from "#/lib/effect-runtime";
+import { runRouteEffect } from "#/lib/http-effect";
 import {
-	streamPeriodDigest,
+	streamPeriodDigestEffect,
 	type PeriodDigestOptions,
 	type PeriodDigestStreamEvent,
 } from "#/lib/period-digest";
@@ -39,64 +42,77 @@ function encodeEvent(event: PeriodDigestStreamEvent) {
 export const Route = createFileRoute("/api/period-digest")({
 	server: {
 		handlers: {
-			GET: async ({ request }) => {
-				await maybeAutoUpdateBackup();
-				const url = new URL(request.url);
-				const options = parseOptions(url);
-				let abortDigest: (() => void) | undefined;
+			GET: ({ request }) =>
+				runRouteEffect(
+					Effect.gen(function* () {
+						yield* maybeAutoUpdateBackupEffect();
+						const url = new URL(request.url);
+						const options = parseOptions(url);
+						let abortDigest: (() => void) | undefined;
 
-				return new Response(
-					new ReadableStream({
-						cancel() {
-							abortDigest?.();
-						},
-						start(controller) {
-							const abortController = new AbortController();
-							let closed = false;
-							const close = () => {
-								closed = true;
-								abortController.abort();
-							};
-							const onAbort = () => close();
-							request.signal.addEventListener("abort", onAbort, { once: true });
-							abortDigest = close;
-							const enqueue = (event: PeriodDigestStreamEvent) => {
-								if (closed) return;
-								try {
-									controller.enqueue(encodeEvent(event));
-								} catch {
-									close();
-								}
-							};
-
-							streamPeriodDigest(
-								{ ...options, signal: abortController.signal },
-								{ onEvent: enqueue },
-							)
-								.catch((error: unknown) => {
-									enqueue({
-										type: "error",
-										error:
-											error instanceof Error ? error.message : "Digest failed",
-									});
-								})
-								.finally(() => {
-									request.signal.removeEventListener("abort", onAbort);
-									if (!closed) {
+						return new Response(
+							new ReadableStream({
+								cancel() {
+									abortDigest?.();
+								},
+								start(controller) {
+									const abortController = new AbortController();
+									let closed = false;
+									const close = () => {
 										closed = true;
-										controller.close();
-									}
-								});
-						},
+										abortController.abort();
+									};
+									const closeController = () => {
+										request.signal.removeEventListener("abort", onAbort);
+										if (!closed) {
+											closed = true;
+											controller.close();
+										}
+									};
+									const onAbort = () => close();
+									request.signal.addEventListener("abort", onAbort, {
+										once: true,
+									});
+									abortDigest = close;
+									const enqueue = (event: PeriodDigestStreamEvent) => {
+										if (closed) return;
+										try {
+											controller.enqueue(encodeEvent(event));
+										} catch {
+											close();
+										}
+									};
+
+									runEffectBackground(
+										streamPeriodDigestEffect(
+											{ ...options, signal: abortController.signal },
+											{ onEvent: enqueue },
+										),
+										{
+											onSuccess: closeController,
+											onFailure: (error) => {
+												enqueue({
+													type: "error",
+													error:
+														error instanceof Error
+															? error.message
+															: "Digest failed",
+												});
+												closeController();
+											},
+										},
+									);
+								},
+							}),
+							{
+								headers: {
+									"cache-control": "no-store",
+									"content-type": "application/x-ndjson; charset=utf-8",
+								},
+							},
+						);
 					}),
-					{
-						headers: {
-							"cache-control": "no-store",
-							"content-type": "application/x-ndjson; charset=utf-8",
-						},
-					},
-				);
-			},
+				),
 		},
 	},
 });

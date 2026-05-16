@@ -1,15 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { getOrFetchLinkPreview } from "#/lib/link-preview-metadata";
-
-function json(data: unknown, init?: ResponseInit) {
-	return new Response(JSON.stringify(data), {
-		...init,
-		headers: {
-			"content-type": "application/json",
-			...init?.headers,
-		},
-	});
-}
+import { Effect } from "effect";
+import { jsonResponse, runRouteEffect } from "#/lib/http-effect";
+import { getOrFetchLinkPreviewEffect } from "#/lib/link-preview-metadata";
 
 function parseUrl(value: string | null) {
 	if (!value) return null;
@@ -27,17 +19,25 @@ function parseUrl(value: string | null) {
 export const Route = createFileRoute("/api/link-preview")({
 	server: {
 		handlers: {
-			GET: async ({ request }) => {
-				const url = new URL(request.url);
-				const previewUrl = parseUrl(url.searchParams.get("url"));
-				const shortUrl = parseUrl(url.searchParams.get("shortUrl"));
-				if (!previewUrl) {
-					return json({ ok: false, message: "Missing url" }, { status: 400 });
-				}
+			GET: ({ request }) =>
+				runRouteEffect(
+					Effect.gen(function* () {
+						const url = new URL(request.url);
+						const previewUrl = parseUrl(url.searchParams.get("url"));
+						const shortUrl = parseUrl(url.searchParams.get("shortUrl"));
+						if (!previewUrl) {
+							return jsonResponse(
+								{ ok: false, message: "Missing url" },
+								{ status: 400 },
+							);
+						}
 
-				const preview = await getOrFetchLinkPreview(previewUrl, { shortUrl });
-				return json({ ok: true, preview });
-			},
+						const preview = yield* getOrFetchLinkPreviewEffect(previewUrl, {
+							shortUrl,
+						});
+						return jsonResponse({ ok: true, preview });
+					}),
+				),
 		},
 	},
 });

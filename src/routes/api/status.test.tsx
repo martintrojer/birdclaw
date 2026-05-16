@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { getRouteHandler } from "#/test/route-handlers";
 
@@ -8,10 +9,14 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("#/lib/backup", () => ({
 	maybeAutoUpdateBackup: mocks.maybeAutoUpdateBackup,
+	maybeAutoUpdateBackupEffect: () =>
+		Effect.promise(() => Promise.resolve(mocks.maybeAutoUpdateBackup())),
 }));
 
 vi.mock("#/lib/queries", () => ({
 	getQueryEnvelope: mocks.getQueryEnvelope,
+	getQueryEnvelopeEffect: () =>
+		Effect.promise(() => Promise.resolve(mocks.getQueryEnvelope())),
 }));
 
 import { Route } from "./status";

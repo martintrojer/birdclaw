@@ -1,15 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { Effect } from "effect";
+import {
+	jsonResponse,
+	requestJsonEffect,
+	runRouteEffect,
+} from "#/lib/http-effect";
 import { getWebSyncJob, parseWebSyncKind, startWebSync } from "#/lib/web-sync";
-
-function json(data: unknown, init?: ResponseInit) {
-	return new Response(JSON.stringify(data), {
-		...init,
-		headers: {
-			"content-type": "application/json",
-			...init?.headers,
-		},
-	});
-}
 
 function parseAccountId(value: unknown) {
 	return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -22,7 +18,7 @@ export const Route = createFileRoute("/api/sync")({
 				const url = new URL(request.url);
 				const id = url.searchParams.get("id");
 				if (!id) {
-					return json(
+					return jsonResponse(
 						{ ok: false, message: "Missing sync job id" },
 						{ status: 400 },
 					);
@@ -30,30 +26,33 @@ export const Route = createFileRoute("/api/sync")({
 
 				const job = getWebSyncJob(id);
 				if (!job) {
-					return json(
+					return jsonResponse(
 						{ ok: false, message: "Sync job not found" },
 						{ status: 404 },
 					);
 				}
 
-				return json(job);
+				return jsonResponse(job);
 			},
-			POST: async ({ request }) => {
-				const body = (await request.json().catch(() => ({}))) as Record<
-					string,
-					unknown
-				>;
-				const kind = parseWebSyncKind(body.kind);
-				if (!kind) {
-					return json(
-						{ ok: false, message: "Unknown sync kind" },
-						{ status: 400 },
-					);
-				}
+			POST: ({ request }) =>
+				runRouteEffect(
+					Effect.gen(function* () {
+						const body = yield* requestJsonEffect<Record<string, unknown>>(
+							request,
+							{},
+						);
+						const kind = parseWebSyncKind(body.kind);
+						if (!kind) {
+							return jsonResponse(
+								{ ok: false, message: "Unknown sync kind" },
+								{ status: 400 },
+							);
+						}
 
-				const job = startWebSync(kind, parseAccountId(body.accountId));
-				return json(job, { status: job.inProgress ? 202 : 200 });
-			},
+						const job = startWebSync(kind, parseAccountId(body.accountId));
+						return jsonResponse(job, { status: job.inProgress ? 202 : 200 });
+					}),
+				),
 		},
 	},
 });

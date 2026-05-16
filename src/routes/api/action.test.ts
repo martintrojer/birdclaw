@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getRouteHandler } from "#/test/route-handlers";
 
@@ -14,23 +15,41 @@ const syncBlocksMock = vi.fn();
 
 vi.mock("#/lib/blocks", () => ({
 	addBlock: (...args: unknown[]) => addBlockMock(...args),
+	addBlockEffect: (...args: unknown[]) =>
+		Effect.promise(() => Promise.resolve(addBlockMock(...args))),
 	removeBlock: (...args: unknown[]) => removeBlockMock(...args),
+	removeBlockEffect: (...args: unknown[]) =>
+		Effect.promise(() => Promise.resolve(removeBlockMock(...args))),
 	syncBlocks: (...args: unknown[]) => syncBlocksMock(...args),
+	syncBlocksEffect: (...args: unknown[]) =>
+		Effect.promise(() => Promise.resolve(syncBlocksMock(...args))),
 }));
 
 vi.mock("#/lib/queries", () => ({
 	createPost: (...args: unknown[]) => createPostMock(...args),
+	createPostEffect: (...args: unknown[]) =>
+		Effect.promise(() => Promise.resolve(createPostMock(...args))),
 	createTweetReply: (...args: unknown[]) => createTweetReplyMock(...args),
+	createTweetReplyEffect: (...args: unknown[]) =>
+		Effect.promise(() => Promise.resolve(createTweetReplyMock(...args))),
 	createDmReply: (...args: unknown[]) => createDmReplyMock(...args),
+	createDmReplyEffect: (...args: unknown[]) =>
+		Effect.promise(() => Promise.resolve(createDmReplyMock(...args))),
 }));
 
 vi.mock("#/lib/mutes", () => ({
 	addMute: (...args: unknown[]) => addMuteMock(...args),
+	addMuteEffect: (...args: unknown[]) =>
+		Effect.promise(() => Promise.resolve(addMuteMock(...args))),
 	removeMute: (...args: unknown[]) => removeMuteMock(...args),
+	removeMuteEffect: (...args: unknown[]) =>
+		Effect.promise(() => Promise.resolve(removeMuteMock(...args))),
 }));
 
 vi.mock("#/lib/inbox", () => ({
 	scoreInbox: (...args: unknown[]) => scoreInboxMock(...args),
+	scoreInboxEffect: (...args: unknown[]) =>
+		Effect.promise(() => Promise.resolve(scoreInboxMock(...args))),
 }));
 
 import { Route } from "./action";

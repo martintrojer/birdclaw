@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getRouteHandler } from "#/test/route-handlers";
 
@@ -7,6 +8,8 @@ const getOrFetchLinkPreviewMock = vi.fn();
 vi.mock("#/lib/link-preview-metadata", () => ({
 	getOrFetchLinkPreview: (...args: unknown[]) =>
 		getOrFetchLinkPreviewMock(...args),
+	getOrFetchLinkPreviewEffect: (...args: unknown[]) =>
+		Effect.promise(() => Promise.resolve(getOrFetchLinkPreviewMock(...args))),
 }));
 
 import { Route } from "./link-preview";

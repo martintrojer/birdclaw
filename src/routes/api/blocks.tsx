@@ -1,5 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { Effect } from "effect";
 import { getBlocksResponse } from "#/lib/blocks";
+import { jsonResponse, runRouteEffect } from "#/lib/http-effect";
 
 function parseNumber(value: string | null) {
 	if (!value) return undefined;
@@ -10,23 +12,19 @@ function parseNumber(value: string | null) {
 export const Route = createFileRoute("/api/blocks")({
 	server: {
 		handlers: {
-			GET: ({ request }) => {
-				const url = new URL(request.url);
-				return new Response(
-					JSON.stringify(
-						getBlocksResponse({
-							accountId: url.searchParams.get("account") ?? undefined,
-							search: url.searchParams.get("search") ?? undefined,
-							limit: parseNumber(url.searchParams.get("limit")) ?? 12,
-						}),
-					),
-					{
-						headers: {
-							"content-type": "application/json",
-						},
-					},
-				);
-			},
+			GET: ({ request }) =>
+				runRouteEffect(
+					Effect.sync(() => {
+						const url = new URL(request.url);
+						return jsonResponse(
+							getBlocksResponse({
+								accountId: url.searchParams.get("account") ?? undefined,
+								search: url.searchParams.get("search") ?? undefined,
+								limit: parseNumber(url.searchParams.get("limit")) ?? 12,
+							}),
+						);
+					}),
+				),
 		},
 	},
 });

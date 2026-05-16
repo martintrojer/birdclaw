@@ -1,15 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { resolveProfilesForHandles } from "#/lib/profile-resolver";
-
-function json(data: unknown, init?: ResponseInit) {
-	return new Response(JSON.stringify(data), {
-		...init,
-		headers: {
-			"content-type": "application/json",
-			...init?.headers,
-		},
-	});
-}
+import { Effect } from "effect";
+import { jsonResponse, runRouteEffect } from "#/lib/http-effect";
+import { resolveProfilesForHandlesEffect } from "#/lib/profile-resolver";
 
 function parseHandles(url: URL) {
 	const rawValues = [
@@ -28,24 +20,28 @@ function parseHandles(url: URL) {
 export const Route = createFileRoute("/api/profile-hydrate")({
 	server: {
 		handlers: {
-			GET: async ({ request }) => {
-				const url = new URL(request.url);
-				const handles = parseHandles(url);
-				if (handles.length === 0) {
-					return json(
-						{ ok: false, message: "Missing handles" },
-						{ status: 400 },
-					);
-				}
+			GET: ({ request }) =>
+				runRouteEffect(
+					Effect.gen(function* () {
+						const url = new URL(request.url);
+						const handles = parseHandles(url);
+						if (handles.length === 0) {
+							return jsonResponse(
+								{ ok: false, message: "Missing handles" },
+								{ status: 400 },
+							);
+						}
 
-				const results = await resolveProfilesForHandles(handles);
-				return json({
-					ok: true,
-					results,
-					hydratedProfiles: results.filter((result) => result.status === "hit")
-						.length,
-				});
-			},
+						const results = yield* resolveProfilesForHandlesEffect(handles);
+						return jsonResponse({
+							ok: true,
+							results,
+							hydratedProfiles: results.filter(
+								(result) => result.status === "hit",
+							).length,
+						});
+					}),
+				),
 		},
 	},
 });

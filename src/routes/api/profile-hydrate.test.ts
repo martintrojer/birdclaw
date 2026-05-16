@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getRouteHandler } from "#/test/route-handlers";
 
@@ -7,6 +8,10 @@ const resolveProfilesForHandlesMock = vi.fn();
 vi.mock("#/lib/profile-resolver", () => ({
 	resolveProfilesForHandles: (...args: unknown[]) =>
 		resolveProfilesForHandlesMock(...args),
+	resolveProfilesForHandlesEffect: (...args: unknown[]) =>
+		Effect.promise(() =>
+			Promise.resolve(resolveProfilesForHandlesMock(...args)),
+		),
 }));
 
 import { Route } from "./profile-hydrate";

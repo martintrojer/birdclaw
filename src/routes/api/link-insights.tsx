@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { maybeAutoUpdateBackup } from "#/lib/backup";
+import { Effect } from "effect";
+import { maybeAutoUpdateBackupEffect } from "#/lib/backup";
 import { getNativeDb } from "#/lib/db";
+import { jsonResponse, runRouteEffect } from "#/lib/http-effect";
 import { getLinkInsights } from "#/lib/link-insights";
 import type {
 	LinkInsightKind,
@@ -8,14 +10,6 @@ import type {
 	LinkInsightSort,
 	LinkInsightSource,
 } from "#/lib/types";
-
-function json(data: unknown) {
-	return new Response(JSON.stringify(data), {
-		headers: {
-			"content-type": "application/json",
-		},
-	});
-}
 
 function parseKind(value: string | null): LinkInsightKind {
 	return value === "videos" ? "videos" : "links";
@@ -57,23 +51,28 @@ function parseNumber(value: string | null) {
 export const Route = createFileRoute("/api/link-insights")({
 	server: {
 		handlers: {
-			GET: async ({ request }) => {
-				await maybeAutoUpdateBackup();
-				getNativeDb();
-				const url = new URL(request.url);
-				return json(
-					getLinkInsights({
-						kind: parseKind(url.searchParams.get("kind")),
-						range: parseRange(url.searchParams.get("range")),
-						sort: parseSort(url.searchParams.get("sort")),
-						source: parseSource(url.searchParams.get("source")),
-						since: url.searchParams.get("since") ?? undefined,
-						until: url.searchParams.get("until") ?? undefined,
-						limit: parseNumber(url.searchParams.get("limit")),
-						commentsLimit: parseNumber(url.searchParams.get("commentsLimit")),
+			GET: ({ request }) =>
+				runRouteEffect(
+					Effect.gen(function* () {
+						yield* maybeAutoUpdateBackupEffect();
+						getNativeDb();
+						const url = new URL(request.url);
+						return jsonResponse(
+							getLinkInsights({
+								kind: parseKind(url.searchParams.get("kind")),
+								range: parseRange(url.searchParams.get("range")),
+								sort: parseSort(url.searchParams.get("sort")),
+								source: parseSource(url.searchParams.get("source")),
+								since: url.searchParams.get("since") ?? undefined,
+								until: url.searchParams.get("until") ?? undefined,
+								limit: parseNumber(url.searchParams.get("limit")),
+								commentsLimit: parseNumber(
+									url.searchParams.get("commentsLimit"),
+								),
+							}),
+						);
 					}),
-				);
-			},
+				),
 		},
 	},
 });
