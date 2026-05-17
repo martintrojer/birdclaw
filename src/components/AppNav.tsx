@@ -84,8 +84,7 @@ export function AppNav() {
 				</nav>
 			</div>
 			<div className={sidebarFooterClass}>
-				<ThemeSlider />
-				<AccountSwitcher />
+				<AccountSwitcher action={<ThemeSlider compact />} />
 			</div>
 		</aside>
 	);

@@ -1,4 +1,5 @@
 import { Check, ChevronDown } from "lucide-react";
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchQueryEnvelope } from "#/lib/api-client";
 import type { AccountRecord } from "#/lib/types";
@@ -23,7 +24,7 @@ function avatarName(account: AccountRecord) {
 	return account.name || account.handle || account.id;
 }
 
-export function AccountSwitcher() {
+export function AccountSwitcher({ action }: { action?: ReactNode } = {}) {
 	const [accounts, setAccounts] = useState<AccountRecord[]>([]);
 	const [open, setOpen] = useState(false);
 	const switcherRef = useRef<HTMLDivElement>(null);
@@ -66,46 +67,70 @@ export function AccountSwitcher() {
 		};
 	}, [open]);
 
-	if (accounts.length < 2 || !selectedAccount) return null;
+	if (accounts.length < 2 || !selectedAccount) {
+		return action ? (
+			<div className="flex justify-center px-1 min-[1100px]:justify-start min-[1100px]:px-2">
+				{action}
+			</div>
+		) : null;
+	}
 
 	return (
 		<div ref={switcherRef} className="relative px-1 min-[1100px]:px-2">
-			<button
-				type="button"
-				aria-expanded={open}
-				aria-haspopup="listbox"
-				aria-label={`Active account: ${accountLabel(selectedAccount)}`}
+			<div
 				className={cx(
-					"group flex h-11 w-full items-center justify-center gap-2 rounded-full border border-transparent bg-transparent px-1.5 text-left text-[var(--ink)] transition-[background,border-color,box-shadow] duration-150 hover:bg-[var(--bg-hover)] focus-visible:border-[color:color-mix(in_srgb,var(--accent)_55%,var(--line))] focus-visible:bg-[var(--bg-active)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:color-mix(in_srgb,var(--accent)_28%,transparent)] min-[1100px]:justify-start min-[1100px]:px-2",
+					"group grid w-full justify-items-center gap-2 text-[var(--ink)] min-[1100px]:flex min-[1100px]:h-11 min-[1100px]:items-center min-[1100px]:justify-start min-[1100px]:gap-1 min-[1100px]:rounded-full min-[1100px]:border min-[1100px]:border-transparent min-[1100px]:bg-transparent min-[1100px]:p-0.5 min-[1100px]:transition-[background,border-color,box-shadow] min-[1100px]:duration-150 min-[1100px]:hover:bg-[var(--bg-hover)]",
 					open &&
-						"border-[color:color-mix(in_srgb,var(--accent)_45%,var(--line))] bg-[var(--bg-active)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent)_20%,transparent)]",
+						"min-[1100px]:border-[color:color-mix(in_srgb,var(--accent)_45%,var(--line))] min-[1100px]:bg-[var(--bg-active)] min-[1100px]:shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent)_20%,transparent)]",
 				)}
-				onClick={() => setOpen((value) => !value)}
 			>
-				<AvatarChip
-					avatarUrl={selectedAccount.avatarUrl}
-					hue={selectedAccount.avatarHue ?? hueForAccount(selectedAccount)}
-					name={avatarName(selectedAccount)}
-					profileId={selectedAccount.profileId}
-					size="small"
-				/>
-				<span className="hidden min-w-0 flex-1 flex-col leading-tight min-[1100px]:flex">
-					<span className="truncate text-[14px] font-bold">
-						{accountLabel(selectedAccount)}
+				<button
+					type="button"
+					aria-expanded={open}
+					aria-haspopup="listbox"
+					aria-label={`Active account: ${accountLabel(selectedAccount)}`}
+					className="flex size-11 min-w-0 flex-none items-center justify-center gap-2 rounded-full px-1 py-1 text-left transition-colors duration-150 hover:bg-[var(--bg-hover)] focus-visible:bg-[var(--bg-active)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:color-mix(in_srgb,var(--accent)_28%,transparent)] min-[1100px]:h-auto min-[1100px]:w-auto min-[1100px]:flex-1 min-[1100px]:justify-start min-[1100px]:hover:bg-transparent"
+					onClick={() => setOpen((value) => !value)}
+				>
+					<AvatarChip
+						avatarUrl={selectedAccount.avatarUrl}
+						hue={selectedAccount.avatarHue ?? hueForAccount(selectedAccount)}
+						name={avatarName(selectedAccount)}
+						profileId={selectedAccount.profileId}
+						size="small"
+					/>
+					<span className="hidden min-w-0 flex-1 flex-col leading-tight min-[1100px]:flex">
+						<span className="truncate text-[14px] font-bold">
+							{accountLabel(selectedAccount)}
+						</span>
+						<span className="truncate text-[11px] font-medium text-[var(--ink-soft)]">
+							active account
+						</span>
 					</span>
-					<span className="truncate text-[11px] font-medium text-[var(--ink-soft)]">
-						active account
-					</span>
-				</span>
-				<ChevronDown
-					className={cx(
-						"hidden size-4 shrink-0 text-[var(--ink-soft)] transition-transform duration-150 min-[1100px]:block",
-						open && "rotate-180",
-					)}
-					strokeWidth={2.2}
-					aria-hidden="true"
-				/>
-			</button>
+				</button>
+				{action ? (
+					<div className="order-first shrink-0 min-[1100px]:order-none">
+						{action}
+					</div>
+				) : null}
+				<button
+					type="button"
+					aria-expanded={open}
+					aria-haspopup="listbox"
+					aria-label="Switch account"
+					className="hidden size-8 shrink-0 items-center justify-center rounded-full text-[var(--ink-soft)] transition-colors duration-150 hover:bg-[var(--bg-hover)] hover:text-[var(--ink)] focus-visible:bg-[var(--bg-active)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:color-mix(in_srgb,var(--accent)_28%,transparent)] min-[1100px]:inline-flex"
+					onClick={() => setOpen((value) => !value)}
+				>
+					<ChevronDown
+						className={cx(
+							"size-4 transition-transform duration-150",
+							open && "rotate-180",
+						)}
+						strokeWidth={2.2}
+						aria-hidden="true"
+					/>
+				</button>
+			</div>
 			{open ? (
 				<div
 					role="listbox"

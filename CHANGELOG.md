@@ -19,6 +19,7 @@
 - Hide unresolved `t.co` placeholders and duplicate preview cards on media tweets, and let single-image media render in a natural image-sized frame.
 - Render reposts as native timeline rows with the original author avatar and a single compact repost attribution.
 - Hide empty bookmark, media, and account metadata from timeline action rows so the footer only shows useful state.
+- Move the theme toggle into the sidebar account footer row so it sits with the active-account controls.
 
 ## 0.5.1 - 2026-05-15
 

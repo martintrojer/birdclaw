@@ -27,7 +27,9 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 vi.mock("./AccountSwitcher", () => ({
-	AccountSwitcher: () => <div data-testid="account-switcher" />,
+	AccountSwitcher: ({ action }: { action?: ReactNode }) => (
+		<div data-testid="account-switcher">{action}</div>
+	),
 }));
 
 import { AppNav } from "./AppNav";
@@ -62,7 +64,7 @@ describe("AppNav", () => {
 		).toBeInTheDocument();
 	});
 
-	it("places the theme toggle above the bottom account picker", () => {
+	it("places the theme toggle inside the bottom account picker", () => {
 		render(
 			<ThemeProvider>
 				<AppNav />
@@ -74,9 +76,6 @@ describe("AppNav", () => {
 		});
 		const accountSwitcher = screen.getByTestId("account-switcher");
 
-		expect(
-			themeButton.compareDocumentPosition(accountSwitcher) &
-				Node.DOCUMENT_POSITION_FOLLOWING,
-		).toBeTruthy();
+		expect(accountSwitcher).toContainElement(themeButton);
 	});
 });
