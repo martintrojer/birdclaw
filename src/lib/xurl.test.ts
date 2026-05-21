@@ -329,6 +329,91 @@ describe("xurl transport wrapper", () => {
 		]);
 	});
 
+	it("lists recent direct message events via xurl oauth2", async () => {
+		execFileAsyncMock.mockResolvedValueOnce({
+			stdout: JSON.stringify({
+				data: [
+					{
+						id: "dm_1",
+						event_type: "MessageCreate",
+						text: "hello",
+						sender_id: "42",
+						participant_ids: ["1", "42"],
+					},
+				],
+				includes: {
+					users: [{ id: "42", username: "sam", name: "Sam" }],
+				},
+				meta: { result_count: 1 },
+			}),
+			stderr: "",
+		});
+		const { listDirectMessageEventsViaXurl } = await import("./xurl");
+
+		await expect(
+			listDirectMessageEventsViaXurl({ maxResults: 5 }),
+		).resolves.toEqual({
+			data: [
+				{
+					id: "dm_1",
+					event_type: "MessageCreate",
+					text: "hello",
+					sender_id: "42",
+					participant_ids: ["1", "42"],
+				},
+			],
+			includes: {
+				users: [{ id: "42", username: "sam", name: "Sam" }],
+			},
+			meta: { result_count: 1 },
+		});
+		expect(execFileAsyncMock).toHaveBeenCalledWith("xurl", [
+			"--auth",
+			"oauth2",
+			`/2/dm_events?max_results=5&event_types=MessageCreate&dm_event.fields=attachments%2Ccreated_at%2Cdm_conversation_id%2Centities%2Cevent_type%2Cid%2Cparticipant_ids%2Creferenced_tweets%2Csender_id%2Ctext&expansions=sender_id%2Cparticipant_ids&user.fields=${RICH_USER_FIELDS}`,
+		]);
+	});
+
+	it("passes pagination tokens for direct message event scans", async () => {
+		execFileAsyncMock.mockResolvedValueOnce({
+			stdout: JSON.stringify({ data: [], meta: { result_count: 0 } }),
+			stderr: "",
+		});
+		const { listDirectMessageEventsViaXurl } = await import("./xurl");
+
+		await listDirectMessageEventsViaXurl({
+			maxResults: 100,
+			paginationToken: "next-page-token",
+		});
+
+		expect(execFileAsyncMock).toHaveBeenCalledWith("xurl", [
+			"--auth",
+			"oauth2",
+			`/2/dm_events?max_results=100&event_types=MessageCreate&dm_event.fields=attachments%2Ccreated_at%2Cdm_conversation_id%2Centities%2Cevent_type%2Cid%2Cparticipant_ids%2Creferenced_tweets%2Csender_id%2Ctext&expansions=sender_id%2Cparticipant_ids&user.fields=${RICH_USER_FIELDS}&pagination_token=next-page-token`,
+		]);
+	});
+
+	it("passes the selected OAuth2 username for direct message event scans", async () => {
+		execFileAsyncMock.mockResolvedValueOnce({
+			stdout: JSON.stringify({ data: [], meta: { result_count: 0 } }),
+			stderr: "",
+		});
+		const { listDirectMessageEventsViaXurl } = await import("./xurl");
+
+		await listDirectMessageEventsViaXurl({
+			maxResults: 10,
+			username: "@steipete",
+		});
+
+		expect(execFileAsyncMock).toHaveBeenCalledWith("xurl", [
+			"--auth",
+			"oauth2",
+			"--username",
+			"steipete",
+			`/2/dm_events?max_results=10&event_types=MessageCreate&dm_event.fields=attachments%2Ccreated_at%2Cdm_conversation_id%2Centities%2Cevent_type%2Cid%2Cparticipant_ids%2Creferenced_tweets%2Csender_id%2Ctext&expansions=sender_id%2Cparticipant_ids&user.fields=${RICH_USER_FIELDS}`,
+		]);
+	});
+
 	it("returns null when whoami payload is not an object", async () => {
 		execFileAsyncMock.mockResolvedValueOnce({
 			stdout: JSON.stringify({ data: "not-an-object" }),
@@ -337,6 +422,48 @@ describe("xurl transport wrapper", () => {
 		const { lookupAuthenticatedUser } = await import("./xurl");
 
 		await expect(lookupAuthenticatedUser()).resolves.toBeNull();
+	});
+
+	it("looks up the authenticated OAuth2 user with the same auth mode as DM reads", async () => {
+		execFileAsyncMock.mockResolvedValueOnce({
+			stdout: JSON.stringify({ data: { id: "1", username: "steipete" } }),
+			stderr: "",
+		});
+		const { lookupAuthenticatedOAuth2UserEffect } = await import("./xurl");
+
+		await expect(
+			Effect.runPromise(lookupAuthenticatedOAuth2UserEffect()),
+		).resolves.toEqual({
+			id: "1",
+			username: "steipete",
+		});
+		expect(execFileAsyncMock).toHaveBeenCalledWith("xurl", [
+			"--auth",
+			"oauth2",
+			"whoami",
+		]);
+	});
+
+	it("passes the selected OAuth2 username for authenticated lookups", async () => {
+		execFileAsyncMock.mockResolvedValueOnce({
+			stdout: JSON.stringify({ data: { id: "1", username: "steipete" } }),
+			stderr: "",
+		});
+		const { lookupAuthenticatedOAuth2UserEffect } = await import("./xurl");
+
+		await expect(
+			Effect.runPromise(lookupAuthenticatedOAuth2UserEffect("@steipete")),
+		).resolves.toEqual({
+			id: "1",
+			username: "steipete",
+		});
+		expect(execFileAsyncMock).toHaveBeenCalledWith("xurl", [
+			"--auth",
+			"oauth2",
+			"--username",
+			"steipete",
+			"whoami",
+		]);
 	});
 
 	it("caches authenticated user lookups for repeated callers", async () => {

@@ -301,11 +301,17 @@ async function runStep({
 			};
 		}
 		if (kind === "dms") {
-			if (!allowBirdAccount) {
+			const dmMode = allowBirdAccount
+				? mode
+				: mode === "bird"
+					? undefined
+					: "xurl";
+			if (!dmMode) {
 				return { kind, ok: false, count: 0, error: birdAccountError(kind) };
 			}
 			const result = await syncDirectMessagesViaCachedBird({
 				account,
+				mode: dmMode,
 				limit: Math.min(50, limit),
 				refresh,
 				cacheTtlMs,

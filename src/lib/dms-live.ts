@@ -10,7 +10,11 @@ import {
 import { getNativeDb } from "./db";
 import { runEffectPromise } from "./effect-runtime";
 import { readSyncCache, writeSyncCache } from "./sync-cache";
-import type { XurlMentionUser } from "./types";
+import type { XurlDmEventsResponse, XurlMentionUser } from "./types";
+import {
+	listDirectMessageEventsViaXurlEffect,
+	lookupAuthenticatedOAuth2UserEffect,
+} from "./xurl";
 import {
 	buildExternalProfileId,
 	randomAvatarHue,
@@ -19,9 +23,13 @@ import {
 
 export const DEFAULT_DMS_CACHE_TTL_MS = 2 * 60_000;
 const PREVIEW_MESSAGE_ID_PREFIX = "preview:";
+const XURL_DMS_MAX_RESULTS = 100;
+
+export type DirectMessagesSyncMode = "auto" | "bird" | "xurl";
 
 export interface SyncDirectMessagesViaCachedBirdOptions {
 	account?: string;
+	mode?: DirectMessagesSyncMode;
 	limit?: number;
 	inbox?: "all" | "accepted" | "requests";
 	maxPages?: number;
@@ -42,6 +50,19 @@ function assertBirdLimit(limit: number) {
 	if (!Number.isFinite(limit) || limit < 1) {
 		throw new Error("bird DM mode requires --limit of at least 1");
 	}
+}
+
+function assertXurlLimit(limit: number) {
+	if (!Number.isFinite(limit) || limit < 1 || limit > XURL_DMS_MAX_RESULTS) {
+		throw new Error("xurl DM mode requires --limit between 1 and 100");
+	}
+}
+
+function parseSyncMode(mode: DirectMessagesSyncMode | undefined) {
+	if (!mode || mode === "bird" || mode === "xurl" || mode === "auto") {
+		return mode ?? "bird";
+	}
+	throw new Error("--mode must be auto, bird, or xurl");
 }
 
 function normalizeExternalUserId(value: string | null | undefined) {
@@ -180,12 +201,14 @@ function getLatestEvent(events: BirdDmEvent[]) {
 }
 
 function assertAuthenticatedBirdAccountMatches({
+	source,
 	accountId,
 	username,
 	externalUserId,
 	liveUsername,
 	liveExternalUserId,
 }: {
+	source: "bird" | "xurl";
 	accountId: string;
 	username: string;
 	externalUserId?: string;
@@ -201,14 +224,27 @@ function assertAuthenticatedBirdAccountMatches({
 	}
 	if (externalUserId && liveExternalUserId) {
 		throw new Error(
-			`bird is authenticated as user ${liveExternalUserId}; refusing to sync into ${accountId} (${externalUserId})`,
+			`${source} is authenticated as user ${liveExternalUserId}; refusing to sync into ${accountId} (${externalUserId})`,
 		);
 	}
 	if (liveUsername.toLowerCase() !== username.toLowerCase()) {
 		throw new Error(
-			`bird is authenticated as @${liveUsername}; refusing to sync into ${accountId} (@${username})`,
+			`${source} is authenticated as @${liveUsername}; refusing to sync into ${accountId} (@${username})`,
 		);
 	}
+}
+
+function getAuthenticatedXurlAccount(payload: Record<string, unknown> | null): {
+	id?: string;
+	username?: string;
+} {
+	if (!payload) return {};
+	return {
+		...(typeof payload.id === "string" ? { id: payload.id } : {}),
+		...(typeof payload.username === "string"
+			? { username: payload.username }
+			: {}),
+	};
 }
 
 function persistAccountExternalUserId(
@@ -524,8 +560,196 @@ function mergeDirectMessagesIntoLocalStore(
 	})();
 }
 
+function getMetaNextToken(meta?: Record<string, unknown>) {
+	const token = meta?.next_token;
+	return typeof token === "string" && token.length > 0 ? token : undefined;
+}
+
+function xurlUserToBirdDmUser(user: XurlMentionUser): BirdDmUser {
+	return {
+		id: String(user.id),
+		username: user.username,
+		name: user.name,
+		profileImageUrl: user.profile_image_url,
+	};
+}
+
+function uniqueDefined(values: Array<string | undefined>) {
+	return [
+		...new Set(values.filter((value): value is string => Boolean(value))),
+	];
+}
+
+function conversationIdForXurlEvent(
+	event: XurlDmEventsResponse["data"][number],
+	localExternalUserId: string,
+) {
+	if (event.dm_conversation_id) {
+		return event.dm_conversation_id;
+	}
+	const ids = uniqueDefined([
+		localExternalUserId,
+		event.sender_id,
+		...(event.participant_ids ?? []),
+	]).sort();
+	return ids.length > 1 ? ids.join("-") : `dm-${event.id}`;
+}
+
+function adaptXurlDmEventsToBirdPayload({
+	payload,
+	localExternalUserId,
+	accountUsername,
+}: {
+	payload: XurlDmEventsResponse;
+	localExternalUserId: string;
+	accountUsername: string;
+}): { conversations: BirdDmConversation[]; events: BirdDmEvent[] } {
+	const users = new Map<string, BirdDmUser>();
+	const addUser = (user?: BirdDmUser) => {
+		if (!user?.id) return;
+		users.set(user.id, { ...users.get(user.id), ...user });
+	};
+	for (const user of payload.includes?.users ?? []) {
+		addUser(xurlUserToBirdDmUser(user));
+	}
+	addUser({
+		id: localExternalUserId,
+		username: accountUsername,
+		name: accountUsername,
+	});
+
+	const eventsByConversation = new Map<string, BirdDmEvent[]>();
+	const events: BirdDmEvent[] = [];
+	for (const event of payload.data) {
+		if (event.event_type && event.event_type !== "MessageCreate") continue;
+		if (!event.id || !event.sender_id || event.text === undefined) continue;
+		const conversationId = conversationIdForXurlEvent(
+			event,
+			localExternalUserId,
+		);
+		const participantIds = uniqueDefined([
+			localExternalUserId,
+			event.sender_id,
+			...(event.participant_ids ?? []),
+		]);
+		for (const id of participantIds) {
+			addUser({ id });
+		}
+		const recipientId =
+			event.sender_id === localExternalUserId
+				? participantIds.find((id) => id !== localExternalUserId)
+				: localExternalUserId;
+		const dmEvent: BirdDmEvent = {
+			id: event.id,
+			conversationId,
+			text: event.text,
+			createdAt: event.created_at,
+			senderId: event.sender_id,
+			...(recipientId ? { recipientId } : {}),
+			sender: users.get(event.sender_id) ?? { id: event.sender_id },
+			...(recipientId
+				? { recipient: users.get(recipientId) ?? { id: recipientId } }
+				: {}),
+			inboxKind: "accepted",
+			isMessageRequest: false,
+		};
+		events.push(dmEvent);
+		const conversationEvents = eventsByConversation.get(conversationId) ?? [];
+		conversationEvents.push(dmEvent);
+		eventsByConversation.set(conversationId, conversationEvents);
+	}
+
+	const conversations = [...eventsByConversation].map(
+		([conversationId, conversationEvents]) => {
+			const latest = getLatestEvent(conversationEvents);
+			const participantIds = uniqueDefined([
+				localExternalUserId,
+				...conversationEvents.flatMap((event) => [
+					event.senderId,
+					event.recipientId,
+				]),
+			]);
+			const participants = participantIds.map((id) => users.get(id) ?? { id });
+			return {
+				id: conversationId,
+				participants,
+				messages: conversationEvents,
+				lastMessageAt: latest?.createdAt,
+				lastMessagePreview: latest?.text,
+				inboxKind: "accepted" as const,
+				isMessageRequest: false,
+			};
+		},
+	);
+
+	return { conversations, events };
+}
+
+function mergeXurlDmPages(pages: XurlDmEventsResponse[]): XurlDmEventsResponse {
+	const usersById = new Map<string, XurlMentionUser>();
+	const eventsById = new Map<string, XurlDmEventsResponse["data"][number]>();
+	let meta: Record<string, unknown> | undefined;
+	for (const page of pages) {
+		for (const user of page.includes?.users ?? []) {
+			usersById.set(user.id, { ...usersById.get(user.id), ...user });
+		}
+		for (const event of page.data) {
+			eventsById.set(event.id, event);
+		}
+		meta = page.meta ?? meta;
+	}
+	return {
+		data: [...eventsById.values()],
+		...(usersById.size > 0
+			? { includes: { users: [...usersById.values()] } }
+			: {}),
+		...(meta ? { meta } : {}),
+	};
+}
+
+function sleepEffect(ms: number | undefined) {
+	return typeof ms === "number" && ms > 0 ? Effect.sleep(ms) : Effect.void;
+}
+
+function fetchDirectMessagesViaXurlEffect({
+	limit,
+	username,
+	maxPages,
+	allPages,
+	pageDelayMs,
+}: {
+	limit: number;
+	username: string;
+	maxPages?: number;
+	allPages: boolean;
+	pageDelayMs?: number;
+}) {
+	return Effect.gen(function* () {
+		const pages: XurlDmEventsResponse[] = [];
+		let paginationToken: string | undefined;
+		let pageIndex = 0;
+		const pageLimit = allPages
+			? Number.POSITIVE_INFINITY
+			: Math.max(1, (maxPages ?? 0) + 1);
+		while (pageIndex < pageLimit) {
+			const page = yield* listDirectMessageEventsViaXurlEffect({
+				maxResults: limit,
+				username,
+				...(paginationToken ? { paginationToken } : {}),
+			});
+			pages.push(page);
+			pageIndex += 1;
+			paginationToken = getMetaNextToken(page.meta);
+			if (!paginationToken) break;
+			yield* sleepEffect(pageDelayMs);
+		}
+		return mergeXurlDmPages(pages);
+	});
+}
+
 export function syncDirectMessagesViaCachedBirdEffect({
 	account,
+	mode,
 	limit = 20,
 	inbox = "all",
 	maxPages,
@@ -536,7 +760,7 @@ export function syncDirectMessagesViaCachedBirdEffect({
 }: SyncDirectMessagesViaCachedBirdOptions = {}): Effect.Effect<
 	{
 		ok: true;
-		source: "bird" | "cache";
+		source: "bird" | "cache" | "xurl";
 		accountId: string;
 		conversations: number;
 		messages: number;
@@ -544,13 +768,24 @@ export function syncDirectMessagesViaCachedBirdEffect({
 	unknown
 > {
 	return Effect.gen(function* () {
-		assertBirdLimit(limit);
+		const parsedMode = parseSyncMode(mode);
+		if (parsedMode === "xurl") {
+			assertXurlLimit(limit);
+		} else {
+			assertBirdLimit(limit);
+		}
+		if (inbox === "requests" && parsedMode === "xurl") {
+			throw new Error(
+				"xurl DM mode cannot read the message-request inbox or accept/reject state; use --mode bird",
+			);
+		}
 		const db = getNativeDb();
 		const resolvedAccount = resolveAccount(db, account);
 		const pageKey = allPages
 			? "all-pages"
 			: `max-pages:${String(maxPages ?? 0)}`;
-		const cacheKey = `dms:bird:${resolvedAccount.accountId}:${String(limit)}:${inbox}:${pageKey}`;
+		const cacheMode = parsedMode === "auto" ? "auto" : parsedMode;
+		const cacheKey = `dms:${cacheMode}:${resolvedAccount.accountId}:${String(limit)}:${inbox}:${pageKey}`;
 		const ttlMs = parseCacheTtlMs(cacheTtlMs);
 		const cached = readSyncCache<{
 			conversations: BirdDmConversation[];
@@ -562,36 +797,112 @@ export function syncDirectMessagesViaCachedBirdEffect({
 
 		const cacheHit = !refresh && cached && cacheAgeMs <= ttlMs;
 		let accountExternalUserId = resolvedAccount.externalUserId;
-		let payload: {
-			conversations: BirdDmConversation[];
-			events: BirdDmEvent[];
-		};
+		let payload:
+			| {
+					conversations: BirdDmConversation[];
+					events: BirdDmEvent[];
+			  }
+			| undefined;
+		let source: "bird" | "xurl" | undefined;
 		if (cacheHit) {
 			payload = cached.value;
 		} else {
-			const authenticated = yield* getAuthenticatedBirdAccountEffect();
-			assertAuthenticatedBirdAccountMatches({
-				accountId: resolvedAccount.accountId,
-				username: resolvedAccount.username,
-				externalUserId: resolvedAccount.externalUserId,
-				liveUsername: authenticated.username,
-				liveExternalUserId: authenticated.id,
-			});
-			accountExternalUserId ??= authenticated.id;
-			if (!resolvedAccount.externalUserId && accountExternalUserId) {
-				persistAccountExternalUserId(
-					db,
-					resolvedAccount.accountId,
-					accountExternalUserId,
+			const tryXurl =
+				(parsedMode === "xurl" || parsedMode === "auto") &&
+				inbox !== "requests";
+			if (tryXurl) {
+				const xurlPayload = yield* Effect.gen(function* () {
+					const authenticated = getAuthenticatedXurlAccount(
+						yield* lookupAuthenticatedOAuth2UserEffect(
+							resolvedAccount.username,
+						),
+					);
+					if (!authenticated.username && !authenticated.id) {
+						return yield* Effect.fail(
+							new Error("xurl authenticated user unavailable"),
+						);
+					}
+					assertAuthenticatedBirdAccountMatches({
+						source: "xurl",
+						accountId: resolvedAccount.accountId,
+						username: resolvedAccount.username,
+						externalUserId: resolvedAccount.externalUserId,
+						liveUsername: authenticated.username ?? resolvedAccount.username,
+						liveExternalUserId: authenticated.id,
+					});
+					accountExternalUserId ??= authenticated.id;
+					if (!resolvedAccount.externalUserId && accountExternalUserId) {
+						persistAccountExternalUserId(
+							db,
+							resolvedAccount.accountId,
+							accountExternalUserId,
+						);
+					}
+					if (!accountExternalUserId) {
+						return yield* Effect.fail(
+							new Error(
+								"xurl authenticated user id unavailable; refusing to sync DMs",
+							),
+						);
+					}
+					return yield* fetchDirectMessagesViaXurlEffect({
+						limit,
+						username: resolvedAccount.username,
+						...(typeof maxPages === "number" ? { maxPages } : {}),
+						allPages,
+						...(typeof pageDelayMs === "number" ? { pageDelayMs } : {}),
+					});
+				}).pipe(
+					Effect.catchAll((error) => {
+						if (parsedMode === "xurl") return Effect.fail(error);
+						return Effect.succeed(undefined);
+					}),
 				);
+				if (xurlPayload) {
+					const localExternalUserId = accountExternalUserId;
+					if (!localExternalUserId) {
+						throw new Error(
+							"xurl authenticated user id unavailable; refusing to sync DMs",
+						);
+					}
+					payload = adaptXurlDmEventsToBirdPayload({
+						payload: xurlPayload,
+						localExternalUserId,
+						accountUsername: resolvedAccount.username,
+					});
+					source = "xurl";
+				}
 			}
-			payload = yield* listDirectMessagesViaBirdEffect({
-				maxResults: limit,
-				...(inbox !== "all" ? { inbox } : {}),
-				...(typeof maxPages === "number" ? { maxPages } : {}),
-				...(allPages ? { allPages } : {}),
-				...(typeof pageDelayMs === "number" ? { pageDelayMs } : {}),
-			});
+			if (!payload) {
+				const authenticated = yield* getAuthenticatedBirdAccountEffect();
+				assertAuthenticatedBirdAccountMatches({
+					source: "bird",
+					accountId: resolvedAccount.accountId,
+					username: resolvedAccount.username,
+					externalUserId: resolvedAccount.externalUserId,
+					liveUsername: authenticated.username,
+					liveExternalUserId: authenticated.id,
+				});
+				accountExternalUserId ??= authenticated.id;
+				if (!resolvedAccount.externalUserId && accountExternalUserId) {
+					persistAccountExternalUserId(
+						db,
+						resolvedAccount.accountId,
+						accountExternalUserId,
+					);
+				}
+				payload = yield* listDirectMessagesViaBirdEffect({
+					maxResults: limit,
+					...(inbox !== "all" ? { inbox } : {}),
+					...(typeof maxPages === "number" ? { maxPages } : {}),
+					...(allPages ? { allPages } : {}),
+					...(typeof pageDelayMs === "number" ? { pageDelayMs } : {}),
+				});
+				source = "bird";
+			}
+		}
+		if (!payload) {
+			throw new Error("DM sync produced no payload");
 		}
 
 		mergeDirectMessagesIntoLocalStore(
@@ -607,7 +918,7 @@ export function syncDirectMessagesViaCachedBirdEffect({
 
 		return {
 			ok: true,
-			source: cacheHit ? "cache" : "bird",
+			source: cacheHit ? "cache" : source!,
 			accountId: resolvedAccount.accountId,
 			conversations: payload.conversations.length,
 			messages: payload.events.length,

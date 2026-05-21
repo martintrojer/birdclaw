@@ -154,10 +154,11 @@ birdclaw sync all --transport auto
 
 ## DMs sync
 
-DMs sit on a separate command because they need `bird` for full-content reads:
+DMs sit on a separate command. `bird` is still the default and required for message-request state; `xurl` can import recent OAuth2 DM events for accepted conversations:
 
 ```bash
 birdclaw dms sync --limit 50 --refresh --json
+birdclaw dms sync --mode auto --limit 50 --refresh --json
 birdclaw dms list --refresh --limit 10 --json
 ```
 

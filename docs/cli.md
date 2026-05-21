@@ -574,11 +574,12 @@ birdclaw profiles replies @jpctan --limit 12 --json
 
 - list DM conversations or events without requiring a full-text query
 - optimized for agent and operator filtering
-- optionally refreshes live DMs through `bird` before listing
+- optionally refreshes live DMs before listing
 
 Flags:
 
 - `--refresh`
+- `--mode bird|xurl|auto`
 - `--cache-ttl <seconds>`
 - `--participant <handle-or-id>`
 - `--min-followers <n>`
@@ -593,16 +594,19 @@ Flags:
 
 ### `dms sync`
 
-- refresh live direct messages through `bird`
+- refresh live direct messages
 - merge conversations/messages into the local SQLite store
 - supports `--json`
 
 Flags:
 
 - `--account <account-id>`
+- `--mode bird|xurl|auto`
 - `--limit <n>`
 - `--refresh`
 - `--cache-ttl <seconds>`
+
+`--mode bird` is the default and the only mode that can sync message requests. `--mode xurl` reads recent OAuth2 `/2/dm_events` as accepted conversations; `--mode auto` tries xurl first for accepted DMs and falls back to bird.
 
 ### `inbox`
 

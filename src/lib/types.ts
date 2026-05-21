@@ -611,6 +611,27 @@ export interface XurlMentionsResponse {
 	meta?: Record<string, unknown>;
 }
 
+export interface XurlDmEvent {
+	id: string;
+	event_type?: string;
+	text?: string;
+	created_at?: string;
+	dm_conversation_id?: string;
+	sender_id?: string;
+	participant_ids?: string[];
+	attachments?: Record<string, unknown>;
+	entities?: Record<string, unknown>;
+	referenced_tweets?: XurlReferencedTweet[];
+}
+
+export interface XurlDmEventsResponse {
+	data: XurlDmEvent[];
+	includes?: {
+		users?: XurlMentionUser[];
+	};
+	meta?: Record<string, unknown>;
+}
+
 export interface XurlTweetsResponse {
 	data: XurlTweetData[];
 	includes?: {

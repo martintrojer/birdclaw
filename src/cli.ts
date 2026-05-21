@@ -43,7 +43,10 @@ import {
 	resolveMentionsDataSource,
 } from "#/lib/config";
 import { closeDatabase } from "#/lib/db";
-import { syncDirectMessagesViaCachedBird } from "#/lib/dms-live";
+import {
+	type DirectMessagesSyncMode,
+	syncDirectMessagesViaCachedBird,
+} from "#/lib/dms-live";
 import { listInboxItems, scoreInbox } from "#/lib/inbox";
 import { backfillLinkIndex, searchLinks } from "#/lib/link-index";
 import { fetchTweetMedia, formatMediaFetchResult } from "#/lib/media-fetch";
@@ -182,6 +185,18 @@ function parseDmInboxOption(
 		return "requests";
 	}
 	printError("--inbox must be all, accepted, or requests");
+	process.exitCode = 1;
+	return undefined;
+}
+
+function parseDmSyncModeOption(
+	value: string | undefined,
+): DirectMessagesSyncMode | undefined {
+	const normalized = (value ?? "bird").trim().toLowerCase();
+	if (normalized === "auto" || normalized === "bird" || normalized === "xurl") {
+		return normalized;
+	}
+	printError("--mode must be auto, bird, or xurl");
 	process.exitCode = 1;
 	return undefined;
 }
@@ -1346,7 +1361,8 @@ jobsCommand
 dmsCommand
 	.command("list")
 	.option("--account <accountId>", "Account id")
-	.option("--refresh", "Refresh live DMs through bird before listing")
+	.option("--mode <mode>", "auto, bird, or xurl", "bird")
+	.option("--refresh", "Refresh live DMs before listing")
 	.option("--cache-ttl <seconds>", "Live-cache freshness window", "120")
 	.option("--inbox <kind>", "all, accepted, or requests", "all")
 	.option("--max-pages <n>", "Additional accepted/request pages to sync", "0")
@@ -1379,6 +1395,7 @@ dmsCommand
 				? "unreplied"
 				: "all";
 		const inbox = parseDmInboxOption(options.inbox);
+		const mode = parseDmSyncModeOption(options.mode);
 		const maxPages = parseNonNegativeIntegerOption(
 			options.maxPages,
 			"--max-pages",
@@ -1389,6 +1406,7 @@ dmsCommand
 		);
 		if (
 			inbox === undefined ||
+			mode === undefined ||
 			maxPages === undefined ||
 			pageDelayMs === undefined
 		) {
@@ -1397,6 +1415,7 @@ dmsCommand
 		if (options.refresh) {
 			await syncDirectMessagesViaCachedBird({
 				account: options.account,
+				mode,
 				limit: Number(options.limit),
 				...(inbox !== "all" ? { inbox } : {}),
 				...(maxPages > 0 ? { maxPages } : {}),
@@ -1446,8 +1465,9 @@ dmsCommand
 
 dmsCommand
 	.command("sync")
-	.description("Refresh live direct messages through bird into the local store")
+	.description("Refresh live direct messages into the local store")
 	.option("--account <accountId>", "Account id")
+	.option("--mode <mode>", "auto, bird, or xurl", "bird")
 	.option("--limit <n>", "Limit messages", "20")
 	.option("--inbox <kind>", "all, accepted, or requests", "all")
 	.option("--max-pages <n>", "Additional accepted/request pages to sync", "0")
@@ -1457,6 +1477,7 @@ dmsCommand
 	.option("--refresh", "Bypass live-cache freshness window")
 	.action(async (options) => {
 		const inbox = parseDmInboxOption(options.inbox);
+		const mode = parseDmSyncModeOption(options.mode);
 		const maxPages = parseNonNegativeIntegerOption(
 			options.maxPages,
 			"--max-pages",
@@ -1467,6 +1488,7 @@ dmsCommand
 		);
 		if (
 			inbox === undefined ||
+			mode === undefined ||
 			maxPages === undefined ||
 			pageDelayMs === undefined
 		) {
@@ -1474,6 +1496,7 @@ dmsCommand
 		}
 		const result = await syncDirectMessagesViaCachedBird({
 			account: options.account,
+			mode,
 			limit: Number(options.limit),
 			...(inbox !== "all" ? { inbox } : {}),
 			...(maxPages > 0 ? { maxPages } : {}),

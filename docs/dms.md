@@ -11,6 +11,7 @@ birdclaw treats DMs as first-class content: full-text indexed, multi-account, an
 
 ```bash
 birdclaw dms list --refresh --limit 10 --json
+birdclaw dms list --refresh --mode auto --limit 10 --json
 birdclaw dms list --unreplied --min-followers 500 --min-influence-score 90 --sort followers --json
 ```
 
@@ -18,7 +19,8 @@ birdclaw dms list --unreplied --min-followers 500 --min-influence-score 90 --sor
 
 Flags:
 
-- `--refresh` — refresh live DMs through `bird` before listing
+- `--refresh` — refresh live DMs before listing
+- `--mode bird|xurl|auto` — choose the live transport for refreshes
 - `--cache-ttl <seconds>` — tune freshness
 - `--participant <handle-or-id>`
 - `--min-followers <n>` / `--max-followers <n>`
@@ -30,20 +32,24 @@ Flags:
 
 ## Sync
 
-Refresh live direct messages through `bird` and merge into the canonical conversation/message tables:
+Refresh live direct messages and merge into the canonical conversation/message tables:
 
 ```bash
 birdclaw dms sync --limit 50 --refresh --json
+birdclaw dms sync --mode auto --limit 50 --refresh --json
 ```
 
 Flags:
 
 - `--account <account-id>`
+- `--mode bird|xurl|auto`
 - `--limit <n>`
 - `--refresh` — force a live fetch
 - `--cache-ttl <seconds>`
 
 Sync is idempotent — re-running merges new events without disturbing already-imported message bodies.
+
+`--mode bird` remains the default because it can read accepted DMs and message requests with accept/reject state. `--mode xurl` imports recent OAuth2 `/2/dm_events` as accepted conversations only; use `--mode auto` to try xurl for accepted DMs and fall back to bird. Message-request inbox syncs always require `bird`.
 
 ## Search
 

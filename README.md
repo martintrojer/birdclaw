@@ -411,9 +411,12 @@ pnpm cli whois "blacksmith guy" --context 4 --no-xurl-fallback --json
 pnpm cli whois "github guy" --current-affiliation github --exclude-domain-only --no-xurl-fallback
 pnpm cli whois "blacksmith" --tweets --context 4 --no-xurl-fallback --json
 pnpm cli dms sync --limit 50 --refresh --json
+pnpm cli dms sync --mode auto --limit 50 --refresh --json
 pnpm cli dms list --refresh --limit 10 --json
 pnpm cli dms list --unreplied --min-followers 500 --min-influence-score 90 --sort followers --json
 ```
+
+`dms sync/list --refresh` supports `--mode bird|xurl|auto`. `bird` is the default and required for message-request state; `xurl` imports recent OAuth2 DM events as accepted conversations, and `auto` falls back to bird when xurl cannot read them.
 
 `--resolve-profiles` fills archive-imported numeric DM profiles through the local
 cache first, then `bird`, then `xurl` unless `--no-xurl-fallback` is set.

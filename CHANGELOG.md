@@ -1,9 +1,10 @@
 # CHANGELOG
 
-## 0.6.1 - Unreleased
+## 0.6.2 - Unreleased
 
 ### Added
 
+- Add `birdclaw dms sync/list --mode xurl|auto` for recent OAuth2 DM event imports through `xurl`, with bird fallback in auto mode.
 - Add an explicit Messages sort toggle for newest conversations or sender follower count.
 - Add web DM inbox controls for switching between all, accepted, and message-request conversations.
 - Render the `What happened` AI digest as a structured day overview with summary cards, signal topics, highlight tweets, links, people, and hover previews for cited tweet ids and `@handle` mentions.

@@ -10,6 +10,8 @@ import { getNativeDb, resetDatabaseForTests } from "./db";
 
 const listDirectMessagesViaBirdMock = vi.fn();
 const getAuthenticatedBirdAccountMock = vi.fn();
+const listDirectMessageEventsViaXurlMock = vi.fn();
+const lookupAuthenticatedUserMock = vi.fn();
 
 vi.mock("./bird", async () => {
 	const { Effect } = await import("effect");
@@ -31,6 +33,31 @@ vi.mock("./bird", async () => {
 	};
 });
 
+vi.mock("./xurl", async () => {
+	const { Effect } = await import("effect");
+	return {
+		lookupAuthenticatedUser: (...args: unknown[]) =>
+			lookupAuthenticatedUserMock(...args),
+		lookupAuthenticatedUserEffect: (...args: unknown[]) =>
+			Effect.tryPromise({
+				try: () => lookupAuthenticatedUserMock(...args),
+				catch: (error) => error,
+			}),
+		lookupAuthenticatedOAuth2UserEffect: (...args: unknown[]) =>
+			Effect.tryPromise({
+				try: () => lookupAuthenticatedUserMock(...args),
+				catch: (error) => error,
+			}),
+		listDirectMessageEventsViaXurl: (...args: unknown[]) =>
+			listDirectMessageEventsViaXurlMock(...args),
+		listDirectMessageEventsViaXurlEffect: (...args: unknown[]) =>
+			Effect.tryPromise({
+				try: () => listDirectMessageEventsViaXurlMock(...args),
+				catch: (error) => error,
+			}),
+	};
+});
+
 const tempDirs: string[] = [];
 
 function makeTempHome() {
@@ -44,7 +71,13 @@ describe("cached live DMs", () => {
 	beforeEach(() => {
 		listDirectMessagesViaBirdMock.mockReset();
 		getAuthenticatedBirdAccountMock.mockReset();
+		listDirectMessageEventsViaXurlMock.mockReset();
+		lookupAuthenticatedUserMock.mockReset();
 		getAuthenticatedBirdAccountMock.mockResolvedValue({
+			id: "25401953",
+			username: "steipete",
+		});
+		lookupAuthenticatedUserMock.mockResolvedValue({
 			id: "25401953",
 			username: "steipete",
 		});
@@ -182,6 +215,135 @@ describe("cached live DMs", () => {
 		]);
 	});
 
+	it("fetches recent xurl DM events into the local store", async () => {
+		makeTempHome();
+		listDirectMessageEventsViaXurlMock.mockResolvedValueOnce({
+			data: [
+				{
+					id: "dm_xurl_1",
+					event_type: "MessageCreate",
+					text: "Hello from xurl",
+					created_at: "2026-05-20T12:00:00.000Z",
+					dm_conversation_id: "25401953-42",
+					sender_id: "42",
+					participant_ids: ["25401953", "42"],
+				},
+			],
+			includes: {
+				users: [
+					{ id: "25401953", username: "steipete", name: "Peter" },
+					{ id: "42", username: "sam", name: "Sam Altman" },
+				],
+			},
+			meta: { result_count: 1 },
+		});
+		const { syncDirectMessagesViaCachedBird } = await import("./dms-live");
+
+		const summary = await syncDirectMessagesViaCachedBird({
+			account: "acct_primary",
+			mode: "xurl",
+			limit: 5,
+			refresh: true,
+		});
+
+		expect(summary).toEqual({
+			ok: true,
+			source: "xurl",
+			accountId: "acct_primary",
+			conversations: 1,
+			messages: 1,
+		});
+		expect(listDirectMessagesViaBirdMock).not.toHaveBeenCalled();
+		expect(lookupAuthenticatedUserMock).toHaveBeenCalledWith("steipete");
+		expect(listDirectMessageEventsViaXurlMock).toHaveBeenCalledWith({
+			maxResults: 5,
+			username: "steipete",
+		});
+		expect(listDmConversations({ search: "xurl", limit: 10 })).toEqual([
+			expect.objectContaining({
+				id: "25401953-42",
+				accountId: "acct_primary",
+				inboxKind: "accepted",
+				isMessageRequest: false,
+				participant: expect.objectContaining({
+					handle: "sam",
+					displayName: "Sam Altman",
+				}),
+			}),
+		]);
+		expect(getConversationThread("25401953-42")?.messages).toEqual([
+			expect.objectContaining({
+				id: "dm_xurl_1",
+				text: "Hello from xurl",
+				direction: "inbound",
+				sender: expect.objectContaining({ handle: "sam" }),
+			}),
+		]);
+	});
+
+	it("paginates xurl DM events when requested", async () => {
+		makeTempHome();
+		listDirectMessageEventsViaXurlMock
+			.mockResolvedValueOnce({
+				data: [
+					{
+						id: "dm_xurl_page_1",
+						event_type: "MessageCreate",
+						text: "Page one",
+						created_at: "2026-05-20T12:00:00.000Z",
+						dm_conversation_id: "25401953-42",
+						sender_id: "42",
+						participant_ids: ["25401953", "42"],
+					},
+				],
+				includes: {
+					users: [
+						{ id: "25401953", username: "steipete", name: "Peter" },
+						{ id: "42", username: "sam", name: "Sam Altman" },
+					],
+				},
+				meta: { next_token: "next-page" },
+			})
+			.mockResolvedValueOnce({
+				data: [
+					{
+						id: "dm_xurl_page_2",
+						event_type: "MessageCreate",
+						text: "Page two",
+						created_at: "2026-05-19T12:00:00.000Z",
+						dm_conversation_id: "25401953-99",
+						sender_id: "99",
+						participant_ids: ["25401953", "99"],
+					},
+				],
+				includes: {
+					users: [{ id: "99", username: "pat", name: "Pat" }],
+				},
+				meta: {},
+			});
+		const { syncDirectMessagesViaCachedBird } = await import("./dms-live");
+
+		await expect(
+			syncDirectMessagesViaCachedBird({
+				mode: "xurl",
+				limit: 5,
+				maxPages: 1,
+				refresh: true,
+			}),
+		).resolves.toEqual(
+			expect.objectContaining({
+				source: "xurl",
+				conversations: 2,
+				messages: 2,
+			}),
+		);
+		expect(listDirectMessageEventsViaXurlMock).toHaveBeenNthCalledWith(2, {
+			maxResults: 5,
+			username: "steipete",
+			paginationToken: "next-page",
+		});
+	});
+
 	it("reuses fresh cache without spending another bird call", async () => {
 		makeTempHome();
 		listDirectMessagesViaBirdMock.mockResolvedValue({
@@ -214,6 +376,72 @@ describe("cached live DMs", () => {
 		await expect(
 			syncDirectMessagesViaCachedBird({ account: "missing", limit: 1 }),
 		).rejects.toThrow("Unknown account: missing");
+		await expect(
+			syncDirectMessagesViaCachedBird({ mode: "xurl", limit: 101 }),
+		).rejects.toThrow("xurl DM mode requires --limit between 1 and 100");
+		await expect(
+			syncDirectMessagesViaCachedBird({
+				mode: "xurl",
+				inbox: "requests",
+				limit: 5,
+			}),
+		).rejects.toThrow("xurl DM mode cannot read the message-request inbox");
+	});
+
+	it("falls back from xurl to bird in auto mode", async () => {
+		makeTempHome();
+		listDirectMessageEventsViaXurlMock.mockRejectedValueOnce(
+			new Error("xurl denied"),
+		);
+		listDirectMessagesViaBirdMock.mockResolvedValueOnce({
+			success: true,
+			conversations: [],
+			events: [],
+		});
+		const { syncDirectMessagesViaCachedBird } = await import("./dms-live");
+
+		await expect(
+			syncDirectMessagesViaCachedBird({
+				mode: "auto",
+				limit: 5,
+				refresh: true,
+			}),
+		).resolves.toEqual(
+			expect.objectContaining({
+				source: "bird",
+			}),
+		);
+		expect(listDirectMessageEventsViaXurlMock).toHaveBeenCalledTimes(1);
+		expect(listDirectMessagesViaBirdMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("uses bird for request inbox syncs in auto mode", async () => {
+		makeTempHome();
+		listDirectMessagesViaBirdMock.mockResolvedValueOnce({
+			success: true,
+			conversations: [],
+			events: [],
+		});
+		const { syncDirectMessagesViaCachedBird } = await import("./dms-live");
+
+		await expect(
+			syncDirectMessagesViaCachedBird({
+				mode: "auto",
+				inbox: "requests",
+				limit: 5,
+				refresh: true,
+			}),
+		).resolves.toEqual(
+			expect.objectContaining({
+				source: "bird",
+			}),
+		);
+		expect(lookupAuthenticatedUserMock).not.toHaveBeenCalled();
+		expect(listDirectMessageEventsViaXurlMock).not.toHaveBeenCalled();
+		expect(listDirectMessagesViaBirdMock).toHaveBeenCalledWith({
+			maxResults: 5,
+			inbox: "requests",
+		});
 	});
 
 	it("refuses to fetch DMs when bird is authenticated as another account", async () => {
@@ -237,6 +465,27 @@ describe("cached live DMs", () => {
 		expect(listDmConversations({ search: "Wrong account", limit: 10 })).toEqual(
 			[],
 		);
+	});
+
+	it("refuses xurl DMs when xurl is authenticated as another account", async () => {
+		makeTempHome();
+		lookupAuthenticatedUserMock.mockResolvedValueOnce({
+			id: "1995710751097659392",
+			username: "openclaw",
+		});
+		const { syncDirectMessagesViaCachedBird } = await import("./dms-live");
+
+		await expect(
+			syncDirectMessagesViaCachedBird({
+				account: "acct_primary",
+				mode: "xurl",
+				limit: 5,
+				refresh: true,
+			}),
+		).rejects.toThrow(
+			"xurl is authenticated as user 1995710751097659392; refusing to sync into acct_primary (25401953)",
+		);
+		expect(listDirectMessageEventsViaXurlMock).not.toHaveBeenCalled();
 	});
 
 	it("refuses payloads that do not include the configured account", async () => {

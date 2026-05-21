@@ -5,6 +5,7 @@ import { runEffectPromise } from "./effect-runtime";
 import type {
 	FollowDirection,
 	TransportStatus,
+	XurlDmEventsResponse,
 	XurlFollowUsersResponse,
 	XurlMentionsResponse,
 	XurlMentionUser,
@@ -23,6 +24,8 @@ const MEDIA_FIELDS =
 	"variants,preview_image_url,url,duration_ms,alt_text,type,width,height,public_metrics";
 const RICH_USER_FIELDS =
 	"description,entities,location,public_metrics,profile_image_url,url,created_at,verified,verified_type";
+const DM_EVENT_FIELDS =
+	"attachments,created_at,dm_conversation_id,entities,event_type,id,participant_ids,referenced_tweets,sender_id,text";
 const THREAD_TWEET_FIELDS =
 	"created_at,conversation_id,entities,public_metrics,referenced_tweets,in_reply_to_user_id,attachments";
 // X bookmarks pagination truncates above 90 until this bug is fixed:
@@ -449,6 +452,20 @@ export function lookupAuthenticatedUserFreshEffect() {
 	);
 }
 
+function oauth2UsernameArgs(username?: string) {
+	const normalized = username?.trim().replace(/^@/, "");
+	return normalized ? ["--username", normalized] : [];
+}
+
+export function lookupAuthenticatedOAuth2UserEffect(username?: string) {
+	return runJsonCommandEffect([
+		"--auth",
+		"oauth2",
+		...oauth2UsernameArgs(username),
+		"whoami",
+	]).pipe(Effect.map(authenticatedUserFromPayload));
+}
+
 export function lookupAuthenticatedUserEffect() {
 	return Effect.gen(function* () {
 		const now = Date.now();
@@ -685,6 +702,56 @@ export function listBookmarkedTweetsViaXurl(options: {
 	paginationToken?: string;
 }): Promise<XurlMentionsResponse> {
 	return runEffectPromise(listBookmarkedTweetsViaXurlEffect(options));
+}
+
+export function listDirectMessageEventsViaXurlEffect({
+	maxResults,
+	username,
+	paginationToken,
+}: {
+	maxResults: number;
+	username?: string;
+	paginationToken?: string;
+}): Effect.Effect<XurlDmEventsResponse, Error> {
+	const query = new URLSearchParams({
+		max_results: String(maxResults),
+		event_types: "MessageCreate",
+		"dm_event.fields": DM_EVENT_FIELDS,
+		expansions: "sender_id,participant_ids",
+		"user.fields": RICH_USER_FIELDS,
+	});
+	if (paginationToken) {
+		query.set("pagination_token", paginationToken);
+	}
+
+	return runJsonCommandEffect([
+		"--auth",
+		"oauth2",
+		...oauth2UsernameArgs(username),
+		`/2/dm_events?${query.toString()}`,
+	]).pipe(
+		Effect.map((payload) => ({
+			data: Array.isArray(payload.data)
+				? (payload.data as XurlDmEventsResponse["data"])
+				: [],
+			includes:
+				payload.includes && typeof payload.includes === "object"
+					? (payload.includes as XurlDmEventsResponse["includes"])
+					: undefined,
+			meta:
+				payload.meta && typeof payload.meta === "object"
+					? (payload.meta as Record<string, unknown>)
+					: undefined,
+		})),
+	);
+}
+
+export function listDirectMessageEventsViaXurl(options: {
+	maxResults: number;
+	username?: string;
+	paginationToken?: string;
+}): Promise<XurlDmEventsResponse> {
+	return runEffectPromise(listDirectMessageEventsViaXurlEffect(options));
 }
 
 export function listFollowUsersViaXurlEffect({
