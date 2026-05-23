@@ -14,7 +14,10 @@ test.beforeEach(async ({ context, baseURL }) => {
 
 async function selectAccount(page: Page, accountHandle: string) {
 	await page.getByRole("button", { name: /^Active account:/ }).click();
-	await page.getByRole("option", { name: new RegExp(accountHandle) }).click();
+	await page
+		.getByRole("listbox", { name: "Active account" })
+		.getByRole("option", { name: new RegExp(accountHandle) })
+		.click();
 	await expect(
 		page.getByRole("button", {
 			name: new RegExp(`^Active account: ${accountHandle}$`),
