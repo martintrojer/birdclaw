@@ -133,6 +133,9 @@ describe("discuss route", () => {
 		fireEvent.change(screen.getAllByRole("combobox")[1]!, {
 			target: { value: "bird" },
 		});
+		fireEvent.change(screen.getAllByRole("combobox")[0]!, {
+			target: { value: "all" },
+		});
 		fireEvent.click(screen.getByLabelText("DMs"));
 		fireEvent.click(screen.getByRole("button", { name: "Discuss" }));
 
@@ -145,6 +148,7 @@ describe("discuss route", () => {
 				"bird 3 fetched · 3 search · 2 timeline · 1 saved · 2 DMs",
 			),
 		).toBeInTheDocument();
+		expect(urls[0]?.searchParams.get("source")).toBe("all");
 		expect(urls[0]?.searchParams.get("mode")).toBe("bird");
 		expect(urls[0]?.searchParams.get("includeDms")).toBe("true");
 		expect(urls[0]?.searchParams.get("question")).toBe("Useful takeaways");
@@ -183,5 +187,78 @@ describe("discuss route", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Discuss" }));
 		expect(await screen.findByText("live failed")).toBeInTheDocument();
+	});
+
+	it("renders non-json and empty-body request failures", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(
+				new Response("plain failure", {
+					status: 503,
+					statusText: "",
+				}),
+			)
+			.mockResolvedValueOnce(new Response(null, { status: 204 }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(<DiscussRoute />);
+		fireEvent.change(screen.getByPlaceholderText("Keywords"), {
+			target: { value: "OpenAI" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Discuss" }));
+
+		expect(
+			await screen.findByText("Discussion request failed (503): plain failure"),
+		).toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("button", { name: "Discuss" }));
+		expect(
+			await screen.findByText("Discussion request failed: empty response body"),
+		).toBeInTheDocument();
+	});
+
+	it("renders json error payloads and malformed responses", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ error: "xurl unauthorized" }), {
+					status: 401,
+					statusText: "Unauthorized",
+					headers: { "content-type": "application/json" },
+				}),
+			)
+			.mockResolvedValueOnce(
+				new Response("{not-json", {
+					status: 502,
+					statusText: "Bad Gateway",
+					headers: { "content-type": "application/json" },
+				}),
+			)
+			.mockResolvedValueOnce(new Response("{not-json\n"));
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(<DiscussRoute />);
+		fireEvent.change(screen.getByPlaceholderText("Keywords"), {
+			target: { value: "OpenAI" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Discuss" }));
+
+		expect(
+			await screen.findByText(
+				"Discussion request failed (401 Unauthorized): xurl unauthorized",
+			),
+		).toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("button", { name: "Discuss" }));
+		expect(
+			await screen.findByText("Discussion request failed (502 Bad Gateway)"),
+		).toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("button", { name: "Discuss" }));
+		expect(
+			await screen.findByText((content) =>
+				/JSON|Unexpected|Expected|not valid/.test(content),
+			),
+		).toBeInTheDocument();
 	});
 });

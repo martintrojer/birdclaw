@@ -170,6 +170,48 @@ describe("search discussion", () => {
 		expect(JSON.stringify(body)).toContain("What should I pay attention to?");
 	});
 
+	it("uses environment AI defaults and renders optional prompt context", async () => {
+		process.env.BIRDCLAW_AI_MODEL = "gpt-env";
+		process.env.BIRDCLAW_OPENAI_REASONING_EFFORT = "low";
+		process.env.BIRDCLAW_OPENAI_SERVICE_TIER = "flex";
+		const streamed = [
+			sseFrame({
+				type: "response.output_text.delta",
+				delta:
+					'# Env\n\nDone.\n\n---\n{"title":"Env","summary":"Env defaults","themes":[],"tensions":[],"followUps":[],"sourceTweetIds":[],"sourceDmConversationIds":[]}',
+			}),
+			"data: [DONE]\n\n",
+		].join("");
+		const fetchMock = vi.fn().mockResolvedValue(streamResponse(streamed));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await streamSearchDiscussion({
+			query: "local-first",
+			account: "acct_primary",
+			source: "all",
+			includeDms: true,
+			since: "2026-05-01",
+			until: "2026-05-24",
+			question: "What changed?",
+			mode: "local",
+			refresh: true,
+			limit: 20,
+		});
+
+		const body = JSON.parse(
+			String(fetchMock.mock.calls[0]?.[1]?.body),
+		) as Record<string, unknown>;
+		expect(body.model).toBe("gpt-env");
+		expect(body.reasoning).toEqual({ effort: "low" });
+		expect(body.service_tier).toBe("flex");
+		expect(JSON.stringify(body)).toContain("Account: acct_primary");
+		expect(JSON.stringify(body)).toContain("Since: 2026-05-01");
+		expect(JSON.stringify(body)).toContain("Until: 2026-05-24");
+		expect(JSON.stringify(body)).toContain(
+			"Discussion question: What changed?",
+		);
+	});
+
 	it("exposes the discussion stream as an Effect program", async () => {
 		const streamed = [
 			sseFrame({
@@ -229,6 +271,214 @@ describe("search discussion", () => {
 			}),
 		).rejects.toThrow("OPENAI_API_KEY is not set");
 		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("surfaces OpenAI response failures", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockResolvedValue(
+				new Response("rate limited", {
+					status: 429,
+					statusText: "Too Many Requests",
+				}),
+			),
+		);
+
+		await expect(
+			streamSearchDiscussion({
+				query: "local-first",
+				mode: "local",
+				refresh: true,
+				limit: 20,
+			}),
+		).rejects.toThrow("OpenAI request failed: 429 rate limited");
+	});
+
+	it("processes OpenAI stream event variants", () => {
+		const handlers = {
+			onDelta: vi.fn(),
+			onEvent: vi.fn(),
+		};
+		const state: {
+			eventBuffer: string;
+			rawText: string;
+			pendingVisible: string;
+			jsonMode: boolean;
+			responseId?: string;
+			usage?: unknown;
+		} = {
+			eventBuffer: "",
+			rawText: "",
+			pendingVisible: "",
+			jsonMode: false,
+		};
+
+		__test__.processSseChunk(
+			state,
+			sseFrame({
+				type: "response.output_text.delta",
+				delta: "# Title\n\nVisible text",
+			}),
+			handlers,
+		);
+		__test__.processSseChunk(
+			state,
+			sseFrame({
+				type: "response.output_text.delta",
+				delta: '\n\n---\n{"title":"Hidden"}',
+			}),
+			handlers,
+		);
+		__test__.processSseChunk(
+			state,
+			sseFrame({
+				type: "response.completed",
+				response: { id: "resp_123", usage: { output_tokens: 4 } },
+			}),
+			handlers,
+		);
+		__test__.processSseChunk(state, "data: {bad json}\n\n", handlers);
+		__test__.processSseChunk(state, "data: [DONE]\n\n", handlers);
+
+		expect(state.jsonMode).toBe(true);
+		expect(state.responseId).toBe("resp_123");
+		expect(state.usage).toEqual({ output_tokens: 4 });
+		expect(handlers.onDelta.mock.calls.flat().join("")).toContain(
+			"Visible text",
+		);
+
+		const failedState: {
+			eventBuffer: string;
+			rawText: string;
+			pendingVisible: string;
+			jsonMode: boolean;
+			error?: string;
+		} = {
+			eventBuffer: "",
+			rawText: "",
+			pendingVisible: "",
+			jsonMode: false,
+		};
+		__test__.processSseChunk(
+			failedState,
+			sseFrame({
+				type: "response.failed",
+				response: { incomplete_details: { reason: "max_output_tokens" } },
+			}),
+			{},
+		);
+		expect(failedState.error).toBe(
+			"OpenAI response incomplete: max_output_tokens",
+		);
+
+		const errorState: {
+			eventBuffer: string;
+			rawText: string;
+			pendingVisible: string;
+			jsonMode: boolean;
+			error?: string;
+		} = {
+			eventBuffer: "",
+			rawText: "",
+			pendingVisible: "",
+			jsonMode: false,
+		};
+		__test__.processSseChunk(
+			errorState,
+			sseFrame({ type: "error", error: { message: "stream denied" } }),
+			{},
+		);
+		expect(errorState.error).toBe("stream denied");
+	});
+
+	it("handles edge cases in streamed event parsing", () => {
+		const holdState = {
+			eventBuffer: "",
+			rawText: "",
+			pendingVisible: "",
+			jsonMode: false,
+		};
+		const handlers = { onDelta: vi.fn(), onEvent: vi.fn() };
+		__test__.processSseChunk(
+			holdState,
+			sseFrame({ type: "response.output_text.delta", delta: "tiny" }),
+			handlers,
+		);
+		expect(holdState.pendingVisible).toBe("tiny");
+		expect(handlers.onDelta).not.toHaveBeenCalled();
+
+		const failedWithMessage: {
+			eventBuffer: string;
+			rawText: string;
+			pendingVisible: string;
+			jsonMode: boolean;
+			error?: string;
+		} = {
+			eventBuffer: "",
+			rawText: "",
+			pendingVisible: "",
+			jsonMode: false,
+		};
+		__test__.processSseChunk(
+			failedWithMessage,
+			sseFrame({
+				type: "response.failed",
+				response: { error: { message: "quota exhausted" } },
+			}),
+			{},
+		);
+		expect(failedWithMessage.error).toBe("quota exhausted");
+
+		const failedDefault: {
+			eventBuffer: string;
+			rawText: string;
+			pendingVisible: string;
+			jsonMode: boolean;
+			error?: string;
+		} = {
+			eventBuffer: "",
+			rawText: "",
+			pendingVisible: "",
+			jsonMode: false,
+		};
+		__test__.processSseChunk(
+			failedDefault,
+			sseFrame({ type: "response.incomplete", response: {} }),
+			{},
+		);
+		expect(failedDefault.error).toBe("OpenAI stream failed");
+
+		const errorDefault: {
+			eventBuffer: string;
+			rawText: string;
+			pendingVisible: string;
+			jsonMode: boolean;
+			error?: string;
+		} = {
+			eventBuffer: "",
+			rawText: "",
+			pendingVisible: "",
+			jsonMode: false,
+		};
+		__test__.processSseChunk(
+			errorDefault,
+			sseFrame({ type: "response.error", error: "plain" }),
+			{},
+		);
+		expect(errorDefault.error).toBe("OpenAI stream failed");
+
+		const completedDefault = {
+			eventBuffer: "",
+			rawText: "",
+			pendingVisible: "",
+			jsonMode: false,
+		};
+		__test__.processSseChunk(
+			completedDefault,
+			sseFrame({ type: "response.completed", response: null }),
+			{},
+		);
+		expect(completedDefault).not.toHaveProperty("responseId");
 	});
 
 	it("falls back when the streamed JSON is malformed", () => {

@@ -118,6 +118,67 @@ describe("live tweet search sync", () => {
 		).toEqual({ count: 1 });
 	});
 
+	it("validates query, account, limit, and max-pages before live search", async () => {
+		const { syncTweetSearch } = await import("./tweet-search-live");
+
+		await expect(syncTweetSearch({ query: "  " })).rejects.toThrow(
+			"Search query is required",
+		);
+		await expect(
+			syncTweetSearch({ query: "local-first", limit: 0 }),
+		).rejects.toThrow("--limit must be at least 1");
+		await expect(
+			syncTweetSearch({ query: "local-first", maxPages: 0 }),
+		).rejects.toThrow("--max-pages must be at least 1");
+		await expect(
+			syncTweetSearch({ query: "local-first", account: "missing" }),
+		).rejects.toThrow("Unknown account: missing");
+		expect(mocks.searchTweetsViaBird).not.toHaveBeenCalled();
+		expect(mocks.searchRecentTweets).not.toHaveBeenCalled();
+	});
+
+	it("returns a local no-op result without touching live transports", async () => {
+		const { syncTweetSearch } = await import("./tweet-search-live");
+
+		const result = await syncTweetSearch({
+			query: "local-first",
+			mode: "local",
+			limit: 10,
+		});
+
+		expect(result).toMatchObject({
+			ok: true,
+			source: "cache",
+			accountId: "acct_primary",
+			query: "local-first",
+			count: 0,
+			pageCount: 0,
+			tweetIds: [],
+		});
+		expect(mocks.searchTweetsViaBird).not.toHaveBeenCalled();
+		expect(mocks.searchRecentTweets).not.toHaveBeenCalled();
+	});
+
+	it("captures explicit live transport failures", async () => {
+		mocks.searchTweetsViaBird.mockRejectedValue(new Error("bird denied"));
+		const { syncTweetSearch } = await import("./tweet-search-live");
+
+		const result = await syncTweetSearch({
+			query: "local-first",
+			mode: "bird",
+			refresh: true,
+			limit: 10,
+		});
+
+		expect(result).toMatchObject({
+			ok: false,
+			source: "bird",
+			accountId: "acct_primary",
+			query: "local-first",
+			error: "bird denied",
+		});
+	});
+
 	it("paginates xurl search and falls back from auto bird failures", async () => {
 		mocks.searchTweetsViaBird.mockRejectedValue(new Error("bird unavailable"));
 		mocks.searchRecentTweets
@@ -149,6 +210,27 @@ describe("live tweet search sync", () => {
 		).toEqual({ count: 2 });
 	});
 
+	it("reports auto failure when both live transports fail", async () => {
+		mocks.searchTweetsViaBird.mockRejectedValue(new Error("bird unavailable"));
+		mocks.searchRecentTweets.mockRejectedValue(new Error("xurl unauthorized"));
+		const { syncTweetSearch } = await import("./tweet-search-live");
+
+		const result = await syncTweetSearch({
+			query: "local-first",
+			mode: "auto",
+			refresh: true,
+			limit: 10,
+		});
+
+		expect(result).toMatchObject({
+			ok: false,
+			source: "auto",
+			accountId: "acct_primary",
+			query: "local-first",
+			error: "bird unavailable; xurl unauthorized",
+		});
+	});
+
 	it("caps persisted xurl results to the requested limit", async () => {
 		mocks.searchRecentTweets.mockResolvedValue(
 			payload(["tweet_xurl_1", "tweet_xurl_2", "tweet_xurl_3"]),
@@ -176,6 +258,50 @@ describe("live tweet search sync", () => {
 				)
 				.get(),
 		).toEqual({ count: 1 });
+	});
+
+	it("caps bird results and reuses xurl cache entries", async () => {
+		mocks.searchTweetsViaBird.mockResolvedValue(
+			payload(["tweet_bird_1", "tweet_bird_2"]),
+		);
+		mocks.searchRecentTweets.mockResolvedValue(payload(["tweet_xurl_cached"]));
+		const { syncTweetSearch } = await import("./tweet-search-live");
+
+		const bird = await syncTweetSearch({
+			query: "local-first",
+			mode: "bird",
+			refresh: true,
+			limit: 1,
+			maxPages: 3,
+		});
+		expect(bird).toMatchObject({
+			ok: true,
+			source: "bird",
+			count: 1,
+			tweetIds: ["tweet_bird_1"],
+		});
+
+		const firstXurl = await syncTweetSearch({
+			query: "cached",
+			mode: "xurl",
+			refresh: true,
+			limit: 10,
+			cacheTtlMs: -1,
+		});
+		const cachedXurl = await syncTweetSearch({
+			query: "cached",
+			mode: "xurl",
+			limit: 10,
+			cacheTtlMs: Number.NaN,
+		});
+
+		expect(firstXurl).toMatchObject({ ok: true, source: "xurl" });
+		expect(cachedXurl).toMatchObject({
+			ok: true,
+			source: "cache",
+			tweetIds: ["tweet_xurl_cached"],
+		});
+		expect(mocks.searchRecentTweets).toHaveBeenCalledTimes(1);
 	});
 
 	it("uses a fresh search cache without hitting live transports", async () => {
