@@ -549,7 +549,13 @@ function runOAuth2JsonCommandEffect({
 			if (primaryCandidates.length === 1) {
 				authCandidate = primaryCandidates[0];
 			} else if (primaryCandidates.length > 1) {
-				authCandidate = { username: primaryUsername };
+				const verifiedUsername = yield* lookupOAuth2UsernameForAccountEffect(
+					primaryUsername,
+					new Set(),
+					deadlineMs,
+					candidates,
+				);
+				authCandidate = verifiedUsername ?? { username: primaryUsername };
 			} else {
 				const fallbackUsername = yield* lookupOAuth2UsernameForAccountEffect(
 					primaryUsername,
