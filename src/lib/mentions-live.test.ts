@@ -151,6 +151,34 @@ describe("cached live mentions", () => {
 		expect(listMentionsViaXurlMock).not.toHaveBeenCalled();
 	});
 
+	it("reports bird mention sync progress", async () => {
+		makeTempHome();
+		listMentionsViaBirdMock.mockResolvedValueOnce({
+			data: [],
+			meta: { result_count: 0 },
+		});
+		const { syncMentions } = await import("./mentions-live");
+		const progress: unknown[] = [];
+
+		const result = await syncMentions({
+			account: "acct_primary",
+			mode: "bird",
+			limit: 5,
+			refresh: true,
+			onProgress: (value) => progress.push(value),
+		});
+
+		expect(result).toMatchObject({ source: "bird", count: 0 });
+		expect(progress).toEqual([
+			expect.objectContaining({
+				source: "bird",
+				fetched: 0,
+				total: 5,
+				done: true,
+			}),
+		]);
+	});
+
 	it("fetches live mentions, caches them, and syncs them into the local timeline", async () => {
 		makeTempHome();
 		listMentionsViaXurlMock.mockResolvedValueOnce({
