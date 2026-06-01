@@ -16,6 +16,8 @@ import {
 import type { TweetSearchMode } from "#/lib/tweet-search-live";
 
 const encoder = new TextEncoder();
+const MAX_DISCUSSION_SEARCH_LIMIT = 20_000;
+const MAX_DISCUSSION_SEARCH_PAGES = 200;
 
 function parseBoolean(value: string | null) {
 	return value === "true" || value === "1" || value === "yes";
@@ -63,10 +65,10 @@ function parseOptions(url: URL): SearchDiscussionOptions {
 		refresh: parseBoolean(url.searchParams.get("refresh")),
 		model: url.searchParams.get("model") === "gpt-5.5" ? "gpt-5.5" : undefined,
 		limit: parseBoundedInteger(url.searchParams.get("limit"), {
-			max: 5_000,
+			max: MAX_DISCUSSION_SEARCH_LIMIT,
 		}),
 		maxPages: parseBoundedInteger(url.searchParams.get("maxPages"), {
-			max: 100,
+			max: MAX_DISCUSSION_SEARCH_PAGES,
 		}),
 	};
 }

@@ -141,8 +141,8 @@ interface OpenAIStreamState {
 const DEFAULT_MODEL = "gpt-5.5";
 const DEFAULT_REASONING_EFFORT = "medium";
 const DEFAULT_SERVICE_TIER = "priority";
-const DEFAULT_LIMIT = 5_000;
-const DEFAULT_MAX_PAGES = 50;
+const DEFAULT_LIMIT = 20_000;
+const DEFAULT_MAX_PAGES = 200;
 const MAX_PROMPT_DATA_CHARS = 1_200_000;
 const DELIMITER_PATTERN = /\n---\s*\n/;
 const VISIBLE_DELIMITER_HOLD = 8;
@@ -169,7 +169,7 @@ function tweetUrl(handle: string, id: string) {
 }
 
 function sourceList(source: SearchDiscussionSource) {
-	if (source !== "all") return [source];
+	if (source !== "all" && source !== "search") return [source];
 	return [
 		"search",
 		"home",

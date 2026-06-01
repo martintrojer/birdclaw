@@ -121,6 +121,13 @@ export function tweetEntitiesFromXurl(raw: unknown): TweetEntities {
 	};
 }
 
+export function profileDescriptionEntitiesFromXurl(
+	raw: unknown,
+): TweetEntities {
+	const entities = asRecord(raw);
+	return tweetEntitiesFromXurl(entities.description);
+}
+
 function spansOverlap(
 	leftStart: number,
 	leftEnd: number,

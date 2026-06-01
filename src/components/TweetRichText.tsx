@@ -19,18 +19,23 @@ export function TweetRichText({
 	entities,
 	className = "body-copy",
 	hiddenUrlRanges = [],
+	urlLabel = "display",
+	as = "p",
 }: {
 	text: string;
 	entities: TweetEntities;
 	className?: string;
 	hiddenUrlRanges?: Array<{ start: number; end: number }>;
+	urlLabel?: "display" | "expanded";
+	as?: "p" | "span";
 }) {
 	const richEntities = enrichFallbackUrlEntities(text, entities);
 	const segments = collectTweetSegments(richEntities);
+	const Wrapper = as;
 	let cursor = 0;
 
 	return (
-		<p className={className === "body-copy" ? bodyCopyClass : className}>
+		<Wrapper className={className === "body-copy" ? bodyCopyClass : className}>
 			{segments.map((segment, index) => {
 				if (
 					segment.start < cursor ||
@@ -65,6 +70,18 @@ export function TweetRichText({
 							<span className={tweetMentionClass}>@{segment.username}</span>
 						</ProfilePreview>
 					);
+				} else if (segment.kind === "mention") {
+					node = (
+						<a
+							key={`segment-${String(index)}`}
+							className={tweetMentionClass}
+							href={`https://x.com/${segment.username}`}
+							rel="noreferrer"
+							target="_blank"
+						>
+							@{segment.username}
+						</a>
+					);
 				} else if (segment.kind === "url") {
 					const href = safeHttpUrl(segment.expandedUrl);
 					if (href) {
@@ -76,7 +93,9 @@ export function TweetRichText({
 								rel="noreferrer"
 								target="_blank"
 							>
-								{segment.displayUrl}
+								{urlLabel === "expanded"
+									? segment.expandedUrl
+									: segment.displayUrl}
 							</a>
 						);
 					}
@@ -99,6 +118,6 @@ export function TweetRichText({
 				);
 			})}
 			{text.slice(cursor)}
-		</p>
+		</Wrapper>
 	);
 }

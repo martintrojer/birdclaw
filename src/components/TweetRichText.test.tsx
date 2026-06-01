@@ -62,6 +62,47 @@ describe("TweetRichText", () => {
 		);
 	});
 
+	it("can show expanded url labels", () => {
+		const { container } = render(
+			<TweetRichText
+				entities={{
+					urls: [
+						{
+							url: "https://t.co/demo",
+							expandedUrl: "https://example.com/demo",
+							displayUrl: "example.com/demo",
+							start: 6,
+							end: 23,
+						},
+					],
+				}}
+				text="Read: https://t.co/demo"
+				urlLabel="expanded"
+			/>,
+		);
+
+		expect(
+			screen.getByRole("link", { name: "https://example.com/demo" }),
+		).toHaveAttribute("href", "https://example.com/demo");
+		expect(container).not.toHaveTextContent("Read: example.com/demo");
+	});
+
+	it("links mention entities even without hydrated profile previews", () => {
+		render(
+			<TweetRichText
+				entities={{
+					mentions: [{ username: "openclaw", start: 5, end: 14 }],
+				}}
+				text="Meet @openclaw"
+			/>,
+		);
+
+		expect(screen.getByRole("link", { name: "@openclaw" })).toHaveAttribute(
+			"href",
+			"https://x.com/openclaw",
+		);
+	});
+
 	it("keeps unsafe url entity text visible as plain text", () => {
 		const { container } = render(
 			<TweetRichText

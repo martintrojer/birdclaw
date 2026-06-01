@@ -1216,7 +1216,7 @@ program
 		"all, search, home, mentions, authored, likes, or bookmarks",
 		"search",
 	)
-	.option("--mode <mode>", "auto, bird, xurl, or local", "auto")
+	.option("--mode <mode>", "auto, bird, xurl, or local", "xurl")
 	.option("--include-dms", "Include private DM search matches")
 	.option("--since <isoDate>", "Include matches created at or after this date")
 	.option("--until <isoDate>", "Include matches created before this date")
@@ -1225,8 +1225,8 @@ program
 	.option("--hide-low-quality", "Hide RTs, tiny replies, and link-only noise")
 	.option("--model <model>", "OpenAI model id")
 	.option("--refresh", "Bypass the local discussion cache")
-	.option("--limit <n>", "Maximum tweet context", "5000")
-	.option("--max-pages <n>", "Maximum live search pages", "50")
+	.option("--limit <n>", "Maximum tweet context", "20000")
+	.option("--max-pages <n>", "Maximum live search pages", "200")
 	.action(async (query, options) => {
 		await autoUpdateBeforeRead();
 		const discussionOptions = buildSearchDiscussionOptions(query, options);
@@ -1245,8 +1245,14 @@ program
 	.option("--max-pages <n>", "Maximum profile timeline pages", "100")
 	.option("--max-conversations <n>", "Maximum conversations to backfill", "80")
 	.option("--max-conversation-pages <n>", "Maximum pages per conversation", "3")
-	.option("--conversation-delay-ms <n>", "Delay between conversation search calls")
-	.option("--rate-limit-retry-ms <n>", "Delay before retrying conversation 429s")
+	.option(
+		"--conversation-delay-ms <n>",
+		"Delay between conversation search calls",
+	)
+	.option(
+		"--rate-limit-retry-ms <n>",
+		"Delay before retrying conversation 429s",
+	)
 	.option("--rate-limit-retries <n>", "Conversation 429 retry count")
 	.action(async (handle, options) => {
 		await autoUpdateBeforeRead();
