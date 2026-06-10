@@ -10,6 +10,28 @@ import { getLinkInsights } from "./link-insights";
 let homeDir = "";
 type TestDb = ReturnType<typeof getNativeDb>;
 
+function localDate(dayOffset = 0, hour = 12, minute = 0) {
+	return new Date(2026, 4, 11 + dayOffset, hour, minute, 0, 0);
+}
+
+function localIso(dayOffset = 0, hour = 12, minute = 0) {
+	return localDate(dayOffset, hour, minute).toISOString();
+}
+
+function withTimezone<T>(timezone: string, run: () => T) {
+	const previous = process.env.TZ;
+	process.env.TZ = timezone;
+	try {
+		return run();
+	} finally {
+		if (previous === undefined) {
+			delete process.env.TZ;
+		} else {
+			process.env.TZ = previous;
+		}
+	}
+}
+
 function insertAccountFixture() {
 	const db = getNativeDb({ seedDemoData: false });
 	const insertAccount = db.prepare(`
@@ -335,7 +357,7 @@ describe("link insights", () => {
 			id: "tweet_forum_event",
 			authorProfileId: "profile_a",
 			text: "Codex event https://t.co/forum",
-			createdAt: "2026-05-11T01:06:00.000Z",
+			createdAt: localIso(0, 1, 6),
 		});
 		insertExpansion(db, {
 			shortUrl: "https://t.co/forum",
@@ -346,12 +368,12 @@ describe("link insights", () => {
 			sourceKind: "tweet",
 			sourceId: "tweet_forum_event",
 			shortUrl: "https://t.co/forum",
-			createdAt: "2026-05-11T01:06:00.000Z",
+			createdAt: localIso(0, 1, 6),
 		});
 
 		const insights = getLinkInsights({
 			range: "today",
-			now: new Date("2026-05-11T12:00:00.000Z"),
+			now: localDate(),
 		});
 
 		expect(insights.items[0]).toMatchObject({
@@ -368,13 +390,13 @@ describe("link insights", () => {
 			id: "tweet_today",
 			authorProfileId: "profile_a",
 			text: "Today https://t.co/today",
-			createdAt: "2026-05-11T09:00:00.000Z",
+			createdAt: localIso(0, 9),
 		});
 		insertDmMessage(db, {
 			id: "dm_yesterday",
 			senderProfileId: "profile_b",
 			text: "Yesterday https://t.co/yesterday",
-			createdAt: "2026-05-10T22:00:00.000Z",
+			createdAt: localIso(-1, 22),
 		});
 		insertExpansion(db, {
 			shortUrl: "https://t.co/today",
@@ -388,26 +410,26 @@ describe("link insights", () => {
 			sourceKind: "tweet",
 			sourceId: "tweet_today",
 			shortUrl: "https://t.co/today",
-			createdAt: "2026-05-11T09:00:00.000Z",
+			createdAt: localIso(0, 9),
 		});
 		insertOccurrence(db, {
 			sourceKind: "dm",
 			sourceId: "dm_yesterday",
 			shortUrl: "https://t.co/yesterday",
-			createdAt: "2026-05-10T22:00:00.000Z",
+			createdAt: localIso(-1, 22),
 		});
 
 		const today = getLinkInsights({
 			range: "today",
 			source: "all",
-			now: new Date("2026-05-11T12:00:00.000Z"),
+			now: localDate(),
 		});
 		expect(today.items.map((item) => item.host)).toEqual(["today.example"]);
 
 		const dm = getLinkInsights({
 			range: "all",
 			source: "dm",
-			now: new Date("2026-05-11T12:00:00.000Z"),
+			now: localDate(),
 		});
 		expect(dm.items.map((item) => item.host)).toEqual(["yesterday.example"]);
 		expect(dm.items[0]?.mentions[0]).toMatchObject({
@@ -417,52 +439,50 @@ describe("link insights", () => {
 		});
 	});
 
-	it("anchors the today range to UTC midnight regardless of host timezone", () => {
-		// created_at is stored as a UTC ISO string, so the "today" boundary must
-		// be UTC midnight too. These occurrences straddle UTC midnight of the
-		// `now` day by 30 minutes on either side, so the classification only holds
-		// under any host timezone when the window starts at 00:00:00.000Z.
-		const db = insertAccountFixture();
-		insertTweet(db, {
-			id: "tweet_after_utc_midnight",
-			authorProfileId: "profile_a",
-			text: "Just after midnight https://t.co/after",
-			createdAt: "2026-05-11T00:30:00.000Z",
-		});
-		insertTweet(db, {
-			id: "tweet_before_utc_midnight",
-			authorProfileId: "profile_b",
-			text: "Just before midnight https://t.co/before",
-			createdAt: "2026-05-10T23:30:00.000Z",
-		});
-		insertExpansion(db, {
-			shortUrl: "https://t.co/after",
-			finalUrl: "https://after.example/post",
-		});
-		insertExpansion(db, {
-			shortUrl: "https://t.co/before",
-			finalUrl: "https://before.example/post",
-		});
-		insertOccurrence(db, {
-			sourceKind: "tweet",
-			sourceId: "tweet_after_utc_midnight",
-			shortUrl: "https://t.co/after",
-			createdAt: "2026-05-11T00:30:00.000Z",
-		});
-		insertOccurrence(db, {
-			sourceKind: "tweet",
-			sourceId: "tweet_before_utc_midnight",
-			shortUrl: "https://t.co/before",
-			createdAt: "2026-05-10T23:30:00.000Z",
-		});
+	it("anchors the today range to local midnight regardless of host timezone", () =>
+		withTimezone("America/New_York", () => {
+			// ISO timestamps store instants in UTC, but "today" is a local calendar
+			// concept. Build both sides of local midnight before converting to ISO.
+			const db = insertAccountFixture();
+			insertTweet(db, {
+				id: "tweet_after_local_midnight",
+				authorProfileId: "profile_a",
+				text: "Just after midnight https://t.co/after",
+				createdAt: localIso(0, 0, 30),
+			});
+			insertTweet(db, {
+				id: "tweet_before_local_midnight",
+				authorProfileId: "profile_b",
+				text: "Just before midnight https://t.co/before",
+				createdAt: localIso(-1, 23, 30),
+			});
+			insertExpansion(db, {
+				shortUrl: "https://t.co/after",
+				finalUrl: "https://after.example/post",
+			});
+			insertExpansion(db, {
+				shortUrl: "https://t.co/before",
+				finalUrl: "https://before.example/post",
+			});
+			insertOccurrence(db, {
+				sourceKind: "tweet",
+				sourceId: "tweet_after_local_midnight",
+				shortUrl: "https://t.co/after",
+				createdAt: localIso(0, 0, 30),
+			});
+			insertOccurrence(db, {
+				sourceKind: "tweet",
+				sourceId: "tweet_before_local_midnight",
+				shortUrl: "https://t.co/before",
+				createdAt: localIso(-1, 23, 30),
+			});
 
-		const today = getLinkInsights({
-			range: "today",
-			now: new Date("2026-05-11T12:00:00.000Z"),
-		});
-		// The 00:30Z link belongs to today, the 23:30Z (prior day) link does not.
-		expect(today.items.map((item) => item.host)).toEqual(["after.example"]);
-	});
+			const today = getLinkInsights({
+				range: "today",
+				now: localDate(),
+			});
+			expect(today.items.map((item) => item.host)).toEqual(["after.example"]);
+		}));
 
 	it("scopes results to the selected account", () => {
 		const db = insertAccountFixture();
@@ -470,20 +490,20 @@ describe("link insights", () => {
 			id: "tweet_primary",
 			authorProfileId: "profile_a",
 			text: "Primary link https://t.co/primary",
-			createdAt: "2026-05-11T09:00:00.000Z",
+			createdAt: localIso(0, 9),
 		});
 		insertTweet(db, {
 			id: "tweet_secondary",
 			accountId: "acct_secondary",
 			authorProfileId: "profile_b",
 			text: "Secondary link https://t.co/secondary",
-			createdAt: "2026-05-11T10:00:00.000Z",
+			createdAt: localIso(0, 10),
 		});
 		insertTweet(db, {
 			id: "tweet_shared",
 			authorProfileId: "profile_a",
 			text: "Shared edge link https://t.co/shared",
-			createdAt: "2026-05-11T11:00:00.000Z",
+			createdAt: localIso(0, 11),
 		});
 		insertExpansion(db, {
 			shortUrl: "https://t.co/primary",
@@ -501,27 +521,27 @@ describe("link insights", () => {
 			sourceKind: "tweet",
 			sourceId: "tweet_primary",
 			shortUrl: "https://t.co/primary",
-			createdAt: "2026-05-11T09:00:00.000Z",
+			createdAt: localIso(0, 9),
 		});
 		insertOccurrence(db, {
 			sourceKind: "tweet",
 			sourceId: "tweet_secondary",
 			shortUrl: "https://t.co/secondary",
 			accountId: "acct_secondary",
-			createdAt: "2026-05-11T10:00:00.000Z",
+			createdAt: localIso(0, 10),
 		});
 		insertOccurrence(db, {
 			sourceKind: "tweet",
 			sourceId: "tweet_shared",
 			shortUrl: "https://t.co/shared",
-			createdAt: "2026-05-11T11:00:00.000Z",
+			createdAt: localIso(0, 11),
 		});
 		insertTweetAccountEdge(db, {
 			accountId: "acct_secondary",
 			tweetId: "tweet_shared",
 		});
 
-		const now = new Date("2026-05-11T12:00:00.000Z");
+		const now = localDate();
 		expect(
 			getLinkInsights({
 				account: "acct_primary",
