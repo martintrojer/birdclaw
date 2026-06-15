@@ -1,21 +1,11 @@
 import { Effect } from "effect";
+import {
+	runSyncPlanEffect,
+	type PaginationPageContext,
+	type PaginationStopReason,
+} from "./sync-plan";
 
-export type PaginationStopReason =
-	| "boundary"
-	| "exhausted"
-	| "item-limit"
-	| "page-limit"
-	| "repeated-cursor";
-
-export interface PaginationPageContext<Page> {
-	cursor?: string;
-	fetched: number;
-	page: Page;
-	pageIndex: number;
-	pageNumber: number;
-	stopReason?: PaginationStopReason;
-	done: boolean;
-}
+export type { PaginationPageContext, PaginationStopReason } from "./sync-plan";
 
 export interface PaginatedSyncResult<Page> {
 	complete: boolean;
@@ -23,11 +13,6 @@ export interface PaginatedSyncResult<Page> {
 	nextCursor?: string;
 	pages: Page[];
 	stopReason: PaginationStopReason;
-}
-
-function normalizeCursor(value: string | null | undefined) {
-	const normalized = value?.trim();
-	return normalized || undefined;
 }
 
 export function collectPaginatedEffect<Page, ErrorType>({
@@ -55,73 +40,54 @@ export function collectPaginatedEffect<Page, ErrorType>({
 	pageDelayMs?: number;
 	shouldStop?: (context: Omit<PaginationPageContext<Page>, "done">) => boolean;
 }): Effect.Effect<PaginatedSyncResult<Page>, ErrorType> {
-	return Effect.gen(function* () {
-		const pages: Page[] = [];
-		const seenCursors = new Set<string>();
-		let cursor = normalizeCursor(initialCursor);
-		let fetched = 0;
-		const pageLimit =
-			maxPages === undefined ? Number.POSITIVE_INFINITY : Math.max(1, maxPages);
-		const itemLimit =
-			maxItems === undefined ? Number.POSITIVE_INFINITY : Math.max(1, maxItems);
-
-		if (cursor) seenCursors.add(cursor);
-
-		while (pages.length < pageLimit) {
-			const pageIndex = pages.length;
-			const page = yield* fetchPage({ cursor, fetched, pageIndex });
-			pages.push(page);
-			fetched += Math.max(0, getItemCount?.(page) ?? 0);
-			const nextCursor = normalizeCursor(getNextCursor(page));
-			const baseContext = {
-				cursor,
-				fetched,
-				page,
-				pageIndex,
-				pageNumber: pageIndex + 1,
-			};
-			let stopReason: PaginationStopReason | undefined;
-
-			if (!nextCursor) {
-				stopReason = "exhausted";
-			} else if (shouldStop?.(baseContext)) {
-				stopReason = "boundary";
-			} else if (fetched >= itemLimit) {
-				stopReason = "item-limit";
-			} else if (pages.length >= pageLimit) {
-				stopReason = "page-limit";
-			} else if (seenCursors.has(nextCursor)) {
-				stopReason = "repeated-cursor";
-			}
-
-			if (stopReason) {
-				onPage?.({ ...baseContext, done: true, stopReason });
-				return {
-					complete:
-						stopReason === "exhausted" ||
-						stopReason === "boundary" ||
-						stopReason === "item-limit",
-					fetched,
-					...(nextCursor ? { nextCursor } : {}),
-					pages,
-					stopReason,
-				};
-			}
-
-			cursor = nextCursor;
-			seenCursors.add(nextCursor!);
-			onPage?.({ ...baseContext, done: false });
-			if (typeof pageDelayMs === "number" && pageDelayMs > 0) {
-				yield* Effect.sleep(pageDelayMs);
-			}
-		}
-
-		return {
-			complete: false,
-			fetched,
-			...(cursor ? { nextCursor: cursor } : {}),
-			pages,
-			stopReason: "page-limit",
-		};
-	});
+	return runSyncPlanEffect({
+		fetchPage,
+		getNextCursor,
+		...(getItemCount ? { getItemCount } : {}),
+		...(initialCursor ? { initialCursor } : {}),
+		...(maxItems !== undefined ? { maxItems } : {}),
+		...(maxPages !== undefined ? { maxPages } : {}),
+		...(onPage
+			? {
+					onPage: (context: {
+						cursor?: string;
+						fetched: number;
+						page: Page;
+						pageIndex: number;
+						pageNumber: number;
+						stopReason?: PaginationStopReason | "error";
+						done: boolean;
+					}) =>
+						onPage({
+							...context,
+							stopReason: context.stopReason as
+								| PaginationStopReason
+								| undefined,
+						}),
+				}
+			: {}),
+		...(pageDelayMs !== undefined ? { pageDelayMs } : {}),
+		...(shouldStop
+			? {
+					shouldStop: (context: {
+						cursor?: string;
+						fetched: number;
+						page: Page;
+						pageIndex: number;
+						pageNumber: number;
+					}) => shouldStop(context),
+				}
+			: {}),
+	}).pipe(
+		Effect.map(
+			(result) =>
+				({
+					complete: result.complete,
+					fetched: result.fetched,
+					...(result.nextCursor ? { nextCursor: result.nextCursor } : {}),
+					pages: result.pages,
+					stopReason: result.stopReason as PaginationStopReason,
+				}) satisfies PaginatedSyncResult<Page>,
+		),
+	);
 }

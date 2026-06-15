@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
 import { getNativeDb } from "./db";
-import { listFollowUsersViaBirdEffect } from "./bird";
-import { runEffectPromise, tryPromise } from "./effect-runtime";
-import { collectPaginatedEffect } from "./paginated-sync";
+import { runEffectPromise } from "./effect-runtime";
+import { liveTransportGateway } from "./live-transport-gateway";
 import type { Database } from "./sqlite";
 import { readSyncCache, writeSyncCache } from "./sync-cache";
+import { runSyncPlanEffect } from "./sync-plan";
 import type {
 	FollowEventKind,
 	FollowDirection,
@@ -17,7 +17,6 @@ import type {
 	XurlPublicMetrics,
 } from "./types";
 import { upsertProfileFromXUser } from "./x-profile";
-import { listFollowUsersViaXurl } from "./xurl";
 
 const DEFAULT_FOLLOW_CACHE_TTL_MS = 24 * 60 * 60_000;
 const DEFAULT_FOLLOW_PAGE_LIMIT = 1000;
@@ -268,17 +267,15 @@ function fetchFollowGraphViaXurlEffect({
 	maxResources?: number;
 }): Effect.Effect<MergedFollowPayload, unknown> {
 	return Effect.gen(function* () {
-		const result = yield* collectPaginatedEffect({
+		const result = yield* runSyncPlanEffect({
 			fetchPage: ({ cursor }) =>
-				tryPromise(() =>
-					listFollowUsersViaXurl({
-						direction,
-						username,
-						userId,
-						maxResults: limit,
-						...(cursor ? { paginationToken: cursor } : {}),
-					}),
-				),
+				liveTransportGateway.xurl.listFollowUsers({
+					direction,
+					username,
+					userId,
+					maxResults: limit,
+					...(cursor ? { paginationToken: cursor } : {}),
+				}),
 			getItemCount: (page) => page.data.length,
 			getNextCursor: (page) =>
 				typeof page.meta?.next_token === "string"
@@ -314,7 +311,7 @@ function fetchFollowGraphViaBirdEffect({
 						maxPages ?? Number.POSITIVE_INFINITY,
 						Math.ceil(maxResources / birdLimit),
 					);
-		const payload = yield* listFollowUsersViaBirdEffect({
+		const payload = yield* liveTransportGateway.bird.listFollowUsers({
 			direction,
 			userId,
 			maxResults: Math.min(birdLimit, maxResources ?? birdLimit),

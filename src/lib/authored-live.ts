@@ -2,9 +2,11 @@ import type { Database } from "./sqlite";
 import { Effect } from "effect";
 import { databaseWriteEffect } from "./database-writer";
 import { getNativeDb } from "./db";
-import { runEffectPromise, tryPromise } from "./effect-runtime";
+import { runEffectPromise } from "./effect-runtime";
+import { liveTransportGateway } from "./live-transport-gateway";
 import { resolveLiveSyncAccount } from "./live-sync-engine";
 import { readSyncCache, writeSyncCache } from "./sync-cache";
+import { runSyncPlanEffect } from "./sync-plan";
 import { tweetEntitiesFromXurl } from "./tweet-render";
 import type {
 	TweetEntities,
@@ -23,11 +25,6 @@ import {
 	ensureStubProfileForXUser,
 	upsertProfileFromXUser,
 } from "./x-profile";
-import {
-	getTransportStatus,
-	listUserTweets,
-	lookupAuthenticatedUser,
-} from "./xurl";
 
 export type AuthoredSyncMode = "xurl";
 
@@ -409,7 +406,7 @@ function resolveAuthoredIdentityEffect({
 	db: Database;
 }) {
 	return Effect.gen(function* () {
-		const status = yield* tryPromise(() => getTransportStatus());
+		const status = yield* liveTransportGateway.xurl.getTransportStatus();
 		if (status.availableTransport !== "xurl") {
 			return yield* Effect.fail(new AuthoredSyncError(status.statusText, 4));
 		}
@@ -425,7 +422,8 @@ function resolveAuthoredIdentityEffect({
 			};
 		}
 
-		const authenticated = yield* tryPromise(() => lookupAuthenticatedUser());
+		const authenticated =
+			yield* liveTransportGateway.xurl.lookupAuthenticatedUser();
 		const authenticatedUser = userFromAuthenticatedPayload(authenticated);
 		if (!authenticatedUser?.id) {
 			return yield* Effect.fail(
@@ -878,7 +876,7 @@ export function syncAuthoredTweetsEffect({
 			archiveSinceSeed ??
 			(untilId ? persistedUntilSinceId : cursor.sinceId) ??
 			null;
-		let nextToken = usePersistedForward
+		const initialToken = usePersistedForward
 			? cursor.token
 			: usePersistedUntil
 				? cursor.token
@@ -886,19 +884,20 @@ export function syncAuthoredTweetsEffect({
 		let newestSeenId = usePersistedForward
 			? maxTweetId(cursor.sinceId, cursor.pendingNewestId)
 			: cursor.sinceId;
-		const pages: XurlUserTweetsResponse[] = [];
 		const sourceUser = toFallbackUser({
 			userId: identity.userId,
 			username: identity.username,
 			authenticatedUser: identity.authenticatedUser,
 		});
-		let pageCount = 0;
 
-		while (parsedMaxPages === null || pageCount < parsedMaxPages) {
-			const fetched = yield* tryPromise(() =>
-				listUserTweets(identity.userId, {
+		const planResult = yield* runSyncPlanEffect({
+			allowPartialFailure: true,
+			initialCursor: initialToken,
+			maxPages: parsedMaxPages ?? undefined,
+			fetchPage: ({ cursor: paginationToken }) =>
+				liveTransportGateway.xurl.listUserTweets(identity.userId, {
 					maxResults: pageLimit,
-					paginationToken: nextToken,
+					paginationToken,
 					excludeRetweets: false,
 					sinceId: effectiveSinceId ?? undefined,
 					untilId,
@@ -909,77 +908,66 @@ export function syncAuthoredTweetsEffect({
 					auth: "oauth2",
 					username: identity.username,
 				}),
-			).pipe(
-				Effect.map((page) => ({ ok: true as const, page })),
-				Effect.catchAll((error) =>
-					Effect.succeed({ ok: false as const, error }),
-				),
-			);
-
-			if (!fetched.ok) {
-				if (pages.length === 0) {
-					return yield* Effect.fail(fetched.error);
-				}
-				const payload = mergePages({
-					pages,
+			getNextCursor: (page) => page.nextToken,
+			persistPage: ({ page, nextCursor: pendingToken }) => {
+				const pagePayload = mergePages({
+					pages: [page],
 					userId: identity.userId,
-					nextToken: nextToken ?? null,
+					nextToken: page.nextToken,
 				});
-				return buildResult({
-					accountId: identity.accountId,
-					userId: identity.userId,
-					effectiveSinceId,
-					nextSinceId: untilId ? cursor.sinceId : effectiveSinceId,
-					nextToken: nextToken ?? null,
-					pageCount,
-					payload,
-					partial: true,
-					error: formatError(fetched.error),
-				});
-			}
-
-			const page = fetched.page;
-			const pagePayload = mergePages({
-				pages: [page],
+				return databaseWriteEffect((writeDb) =>
+					mergeAuthoredPayloadIntoLocalStore({
+						db: writeDb,
+						accountId: identity.accountId,
+						payload: pagePayload,
+						sourceUser,
+					}),
+				).pipe(
+					Effect.flatMap(() =>
+						trySync(() => {
+							newestSeenId = maxTweetId(
+								newestSeenId,
+								pagePayload.meta.newest_id,
+							);
+							if (pendingToken && untilId) {
+								writePendingUntilCursor(db, identity.accountId, {
+									sinceId: cursor.sinceId,
+									token: pendingToken,
+									untilId,
+									requestedSinceId: effectiveSinceId,
+								});
+							} else if (pendingToken) {
+								writePendingForwardCursor(db, identity.accountId, {
+									sinceId: effectiveSinceId,
+									token: pendingToken,
+									pendingNewestId: newestSeenId,
+								});
+							}
+						}),
+					),
+				);
+			},
+		});
+		const pages = planResult.pages;
+		const pageCount = pages.length;
+		const nextToken = planResult.nextCursor;
+		if (planResult.stopReason === "error") {
+			const payload = mergePages({
+				pages,
 				userId: identity.userId,
-				nextToken: page.nextToken,
+				nextToken: nextToken ?? null,
 			});
-			yield* databaseWriteEffect((writeDb) =>
-				mergeAuthoredPayloadIntoLocalStore({
-					db: writeDb,
-					accountId: identity.accountId,
-					payload: pagePayload,
-					sourceUser,
-				}),
-			);
-			pages.push(page);
-			pageCount += 1;
-			newestSeenId = maxTweetId(newestSeenId, pagePayload.meta.newest_id);
-			nextToken = page.nextToken ?? undefined;
-
-			const pendingToken = nextToken;
-			if (pendingToken && untilId) {
-				yield* trySync(() =>
-					writePendingUntilCursor(db, identity.accountId, {
-						sinceId: cursor.sinceId,
-						token: pendingToken,
-						untilId,
-						requestedSinceId: effectiveSinceId,
-					}),
-				);
-			} else if (pendingToken) {
-				yield* trySync(() =>
-					writePendingForwardCursor(db, identity.accountId, {
-						sinceId: effectiveSinceId,
-						token: pendingToken,
-						pendingNewestId: newestSeenId,
-					}),
-				);
-			}
-
-			if (!nextToken) {
-				break;
-			}
+			return buildResult({
+				accountId: identity.accountId,
+				userId: identity.userId,
+				effectiveSinceId,
+				nextSinceId: untilId ? cursor.sinceId : effectiveSinceId,
+				nextToken: nextToken ?? null,
+				pageCount,
+				payload,
+				partial: true,
+				error: formatError(planResult.error),
+			});
 		}
 
 		const capped = Boolean(nextToken);

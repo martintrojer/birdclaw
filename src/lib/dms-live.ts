@@ -4,23 +4,18 @@ import {
 	type BirdDmConversation,
 	type BirdDmEvent,
 	type BirdDmUser,
-	getAuthenticatedBirdAccountEffect,
-	listDirectMessagesViaBirdEffect,
 } from "./bird";
 import { getNativeDb } from "./db";
 import { runEffectPromise } from "./effect-runtime";
+import { liveTransportGateway } from "./live-transport-gateway";
 import {
 	assertLiveAccountMatches,
 	resolveLiveSyncAccount,
 	type LiveSyncAccount,
 } from "./live-sync-engine";
-import { collectPaginatedEffect } from "./paginated-sync";
 import { readSyncCache, writeSyncCache } from "./sync-cache";
+import { runSyncPlanEffect } from "./sync-plan";
 import type { XurlDmEventsResponse, XurlMentionUser } from "./types";
-import {
-	listDirectMessageEventsViaXurlEffect,
-	lookupAuthenticatedOAuth2UserEffect,
-} from "./xurl";
 import {
 	buildExternalProfileId,
 	randomAvatarHue,
@@ -677,9 +672,9 @@ function fetchDirectMessagesViaXurlEffect({
 		const pageLimit = allPages
 			? Number.POSITIVE_INFINITY
 			: Math.max(1, (maxPages ?? 0) + 1);
-		const result = yield* collectPaginatedEffect({
+		const result = yield* runSyncPlanEffect({
 			fetchPage: ({ cursor }) =>
-				listDirectMessageEventsViaXurlEffect({
+				liveTransportGateway.xurl.listDirectMessages({
 					maxResults: limit,
 					username,
 					...(cursor ? { paginationToken: cursor } : {}),
@@ -758,7 +753,7 @@ export function syncDirectMessagesViaCachedBirdEffect({
 			if (tryXurl) {
 				const xurlPayload = yield* Effect.gen(function* () {
 					const authenticated = getAuthenticatedXurlAccount(
-						yield* lookupAuthenticatedOAuth2UserEffect(
+						yield* liveTransportGateway.xurl.lookupAuthenticatedOAuth2User(
 							resolvedAccount.username,
 						),
 					);
@@ -817,7 +812,8 @@ export function syncDirectMessagesViaCachedBirdEffect({
 				}
 			}
 			if (!payload) {
-				const authenticated = yield* getAuthenticatedBirdAccountEffect();
+				const authenticated =
+					yield* liveTransportGateway.bird.getAuthenticatedAccount();
 				assertAuthenticatedBirdAccountMatches({
 					source: "bird",
 					account: resolvedAccount,
@@ -832,7 +828,7 @@ export function syncDirectMessagesViaCachedBirdEffect({
 						accountExternalUserId,
 					);
 				}
-				payload = yield* listDirectMessagesViaBirdEffect({
+				payload = yield* liveTransportGateway.bird.listDirectMessages({
 					maxResults: limit,
 					...(inbox !== "all" ? { inbox } : {}),
 					...(typeof maxPages === "number" ? { maxPages } : {}),
