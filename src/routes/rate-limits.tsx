@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import {
 	Activity,
 	AlertTriangle,
@@ -7,7 +8,8 @@ import {
 	RefreshCw,
 	ShieldCheck,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
+import { queryKeys } from "#/lib/query-client";
 import type {
 	XurlRateLimitEndpointSnapshot,
 	XurlRateLimitEvent,
@@ -192,25 +194,15 @@ function EventRow({
 }
 
 function RateLimitsRoute() {
-	const [snapshot, setSnapshot] = useState<XurlRateLimitSnapshot | null>(null);
-	const [error, setError] = useState<string | null>(null);
-	const [loading, setLoading] = useState(true);
+	const rateLimitsQuery = useQuery({
+		queryKey: queryKeys.rateLimits,
+		queryFn: fetchRateLimits,
+		staleTime: 60_000,
+	});
+	const snapshot = rateLimitsQuery.data ?? null;
+	const loading = rateLimitsQuery.isFetching;
+	const error = rateLimitsQuery.error;
 	const nowMs = useMemo(() => Date.now(), [snapshot]);
-
-	const load = useCallback(() => {
-		setLoading(true);
-		setError(null);
-		fetchRateLimits()
-			.then(setSnapshot)
-			.catch((cause: unknown) => {
-				setError(cause instanceof Error ? cause.message : "Rate limits failed");
-			})
-			.finally(() => setLoading(false));
-	}, []);
-
-	useEffect(() => {
-		load();
-	}, [load]);
 
 	return (
 		<section className="flex min-h-screen flex-col">
@@ -238,7 +230,7 @@ function RateLimitsRoute() {
 						<button
 							className={secondaryButtonClass}
 							disabled={loading}
-							onClick={load}
+							onClick={() => void rateLimitsQuery.refetch()}
 							type="button"
 						>
 							<RefreshCw
@@ -251,7 +243,11 @@ function RateLimitsRoute() {
 				</div>
 			</header>
 
-			{error ? <div className={errorCopyClass}>{error}</div> : null}
+			{error ? (
+				<div className={errorCopyClass}>
+					{error instanceof Error ? error.message : "Rate limits failed"}
+				</div>
+			) : null}
 
 			{snapshot ? (
 				<>

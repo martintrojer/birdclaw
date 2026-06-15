@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import {
 	AlertTriangle,
 	CheckCircle2,
@@ -8,7 +9,8 @@ import {
 	TerminalSquare,
 	XCircle,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
+import { queryKeys } from "#/lib/query-client";
 import type {
 	LiveDataSourceCapability,
 	LiveDataSourceKind,
@@ -169,11 +171,14 @@ function CapabilityRow({
 }
 
 function DataSourcesRoute() {
-	const [snapshot, setSnapshot] = useState<LiveDataSourcesResponse | null>(
-		null,
-	);
-	const [error, setError] = useState<string | null>(null);
-	const [loading, setLoading] = useState(true);
+	const dataSourcesQuery = useQuery({
+		queryKey: queryKeys.dataSources,
+		queryFn: fetchDataSources,
+		staleTime: 5 * 60_000,
+	});
+	const snapshot = dataSourcesQuery.data ?? null;
+	const loading = dataSourcesQuery.isFetching;
+	const error = dataSourcesQuery.error;
 	const sourcesByKind = useMemo(
 		() =>
 			new Map(
@@ -181,23 +186,6 @@ function DataSourcesRoute() {
 			),
 		[snapshot],
 	);
-
-	const load = useCallback(() => {
-		setLoading(true);
-		setError(null);
-		fetchDataSources()
-			.then(setSnapshot)
-			.catch((cause: unknown) => {
-				setError(
-					cause instanceof Error ? cause.message : "Data sources unavailable",
-				);
-			})
-			.finally(() => setLoading(false));
-	}, []);
-
-	useEffect(() => {
-		load();
-	}, [load]);
 
 	return (
 		<section className="flex min-h-screen flex-col">
@@ -213,7 +201,7 @@ function DataSourcesRoute() {
 						<button
 							className={secondaryButtonClass}
 							type="button"
-							onClick={load}
+							onClick={() => void dataSourcesQuery.refetch()}
 							disabled={loading}
 						>
 							<RefreshCw className={cx("size-4", loading && "animate-spin")} />
@@ -222,7 +210,11 @@ function DataSourcesRoute() {
 					</div>
 				</div>
 			</header>
-			{error ? <div className={errorCopyClass}>{error}</div> : null}
+			{error ? (
+				<div className={errorCopyClass}>
+					{error instanceof Error ? error.message : "Data sources unavailable"}
+				</div>
+			) : null}
 			{snapshot ? (
 				<>
 					<div className="grid border-t border-[var(--line)]">

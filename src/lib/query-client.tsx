@@ -12,6 +12,11 @@ export const queryKeys = {
 	linkInsights: ["link-insights"] as const,
 	profileHydration: ["profile-hydration"] as const,
 	networkMap: ["network-map"] as const,
+	blocks: ["blocks"] as const,
+	blockSync: ["block-sync"] as const,
+	inbox: ["inbox"] as const,
+	dataSources: ["data-sources"] as const,
+	rateLimits: ["rate-limits"] as const,
 };
 
 export function createBirdclawQueryClient() {

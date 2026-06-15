@@ -9,6 +9,7 @@
 - Share page caps, cursor progression, delays, and repeated-cursor protection across live timeline, DM, and follow-graph sync.
 - Stream archive arrays and backup JSONL records through resumable batches instead of buffering entire source files.
 - Split query access into typed timeline, DM, status, resource, and action modules while retaining the existing compatibility import.
+- Retain Blocks, Inbox, Data Sources, and Rate Limits server state in TanStack Query across sidebar navigation and targeted refreshes.
 
 ## 0.8.2 - 2026-06-15
 

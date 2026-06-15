@@ -1,15 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
+import {
+	keepPreviousData,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { Sparkles } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useSelectedAccountId } from "#/components/account-selection";
 import { InboxCard } from "#/components/InboxCard";
-import { postAction } from "#/lib/api-client";
-import type {
-	InboxItem,
-	InboxKind,
-	InboxResponse,
-	QueryEnvelope,
-} from "#/lib/types";
+import { fetchQueryEnvelope, postAction } from "#/lib/api-client";
+import { queryKeys } from "#/lib/query-client";
+import type { InboxItem, InboxKind, InboxResponse } from "#/lib/types";
 import {
 	cx,
 	emptyStateClass,
@@ -40,45 +42,64 @@ const TABS: Array<{ value: InboxKind; label: string }> = [
 ];
 
 function InboxRoute() {
-	const [meta, setMeta] = useState<QueryEnvelope | null>(null);
-	const [items, setItems] = useState<InboxItem[]>([]);
+	const queryClient = useQueryClient();
 	const [kind, setKind] = useState<InboxKind>("mixed");
 	const [minScore, setMinScore] = useState("40");
 	const [hideLowSignal, setHideLowSignal] = useState(true);
-	const [refreshTick, setRefreshTick] = useState(0);
-	const [isScoring, setIsScoring] = useState(false);
 	const [activeReplyId, setActiveReplyId] = useState<string | null>(null);
 	const [replyDraft, setReplyDraft] = useState("");
 	const [isSendingReply, setIsSendingReply] = useState(false);
 	const [replyError, setReplyError] = useState<string | null>(null);
-	const [stats, setStats] = useState<InboxResponse["stats"] | null>(null);
+	const statusQuery = useQuery({
+		queryKey: queryKeys.status,
+		queryFn: ({ signal }) => fetchQueryEnvelope({ signal }),
+	});
+	const meta = statusQuery.data ?? null;
 	const selectedAccountId = useSelectedAccountId(meta?.accounts);
+	const inboxQueryKey = [
+		...queryKeys.inbox,
+		{
+			hideLowSignal,
+			kind,
+			minScore,
+			selectedAccountId: selectedAccountId ?? null,
+		},
+	] as const;
+	const inboxQuery = useQuery({
+		queryKey: inboxQueryKey,
+		queryFn: async ({ signal }) => {
+			const url = new URL("/api/inbox", window.location.origin);
+			url.searchParams.set("kind", kind);
+			url.searchParams.set("minScore", minScore);
+			if (selectedAccountId) {
+				url.searchParams.set("account", selectedAccountId);
+			}
+			if (hideLowSignal) {
+				url.searchParams.set("hideLowSignal", "1");
+			}
 
-	useEffect(() => {
-		fetch("/api/status")
-			.then((response) => response.json())
-			.then((data: QueryEnvelope) => setMeta(data));
-	}, []);
-
-	useEffect(() => {
-		const url = new URL("/api/inbox", window.location.origin);
-		url.searchParams.set("kind", kind);
-		url.searchParams.set("minScore", minScore);
-		url.searchParams.set("refresh", String(refreshTick));
-		if (selectedAccountId) {
-			url.searchParams.set("account", selectedAccountId);
-		}
-		if (hideLowSignal) {
-			url.searchParams.set("hideLowSignal", "1");
-		}
-
-		fetch(url)
-			.then((response) => response.json())
-			.then((data: InboxResponse) => {
-				setItems(data.items);
-				setStats(data.stats);
-			});
-	}, [hideLowSignal, kind, minScore, refreshTick, selectedAccountId]);
+			const response = await fetch(url, { signal });
+			if (!response.ok) {
+				throw new Error(`Inbox request failed (${String(response.status)})`);
+			}
+			return (await response.json()) as InboxResponse;
+		},
+		placeholderData: keepPreviousData,
+		staleTime: 5 * 60_000,
+	});
+	const items = inboxQuery.data?.items ?? [];
+	const stats = inboxQuery.data?.stats ?? null;
+	const scoreMutation = useMutation({
+		mutationFn: () =>
+			postAction({
+				kind: "scoreInbox",
+				scoreKind: kind,
+				account: selectedAccountId,
+				limit: 8,
+			}),
+		onSuccess: () =>
+			queryClient.invalidateQueries({ queryKey: queryKeys.inbox }),
+	});
 
 	const subtitle = useMemo(() => {
 		if (!meta || !stats) return "Ranking unreplied mentions and DMs...";
@@ -86,22 +107,7 @@ function InboxRoute() {
 	}, [meta, stats]);
 
 	async function scoreNow() {
-		setIsScoring(true);
-		try {
-			await fetch("/api/action", {
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({
-					kind: "scoreInbox",
-					scoreKind: kind,
-					account: selectedAccountId,
-					limit: 8,
-				}),
-			});
-			setRefreshTick((value) => value + 1);
-		} finally {
-			setIsScoring(false);
-		}
+		await scoreMutation.mutateAsync();
 	}
 
 	async function sendReply(item: InboxItem) {
@@ -125,7 +131,7 @@ function InboxRoute() {
 			);
 			setReplyDraft("");
 			setActiveReplyId(null);
-			setRefreshTick((value) => value + 1);
+			await queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
 		} catch (error) {
 			setReplyError(error instanceof Error ? error.message : "Reply failed");
 		} finally {
@@ -143,12 +149,12 @@ function InboxRoute() {
 					</div>
 					<button
 						className={primaryButtonClass}
-						disabled={isScoring}
+						disabled={scoreMutation.isPending}
 						onClick={() => void scoreNow()}
 						type="button"
 					>
 						<Sparkles className="size-4" strokeWidth={2.2} />
-						{isScoring ? "Scoring..." : "Score with OpenAI"}
+						{scoreMutation.isPending ? "Scoring..." : "Score with OpenAI"}
 					</button>
 				</div>
 				<div className="flex flex-wrap items-center gap-2 px-4 pb-3">

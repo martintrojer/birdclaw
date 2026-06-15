@@ -1,12 +1,10 @@
-import {
-	cleanup,
-	fireEvent,
-	render,
-	screen,
-	waitFor,
-} from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import type { ComponentType } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+	createTestQueryClient,
+	renderWithQueryClient as render,
+} from "#/test/render";
 import { Route } from "./rate-limits";
 
 const RateLimitsRoute = Route.options.component as ComponentType;
@@ -115,5 +113,40 @@ describe("rate limits route", () => {
 		await waitFor(() => {
 			expect(fetchMock).toHaveBeenCalledTimes(2);
 		});
+	});
+
+	it("retains cached server state across remounts", async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					generatedAt: "2026-05-31T12:00:00.000Z",
+					windowMs: 900000,
+					docsUrl: "https://docs.x.com/x-api/fundamentals/rate-limits",
+					summary: {
+						totalCallsLastWindow: 1,
+						rateLimitedLastWindow: 0,
+						errorLastWindow: 0,
+						criticalEndpoints: 0,
+						lastEventAt: null,
+					},
+					throttle: {
+						conversationDelayMs: 3100,
+						rateLimitRetryMs: 60000,
+						rateLimitMaxRetries: 1,
+					},
+					endpoints: [],
+					events: [],
+				}),
+			),
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		const queryClient = createTestQueryClient();
+
+		const first = render(<RateLimitsRoute />, { queryClient });
+		expect(await screen.findByText("1")).toBeInTheDocument();
+		first.unmount();
+		render(<RateLimitsRoute />, { queryClient });
+		expect(await screen.findByText("1")).toBeInTheDocument();
+		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 });

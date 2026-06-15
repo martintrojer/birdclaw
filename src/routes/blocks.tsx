@@ -1,13 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
+import {
+	keepPreviousData,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { AvatarChip } from "#/components/AvatarChip";
+import { useDebouncedValue } from "#/components/useDebouncedValue";
+import { fetchQueryEnvelope, postAction } from "#/lib/api-client";
 import { formatCompactNumber } from "#/lib/present";
-import type {
-	BlockItem,
-	BlockListResponse,
-	BlockSearchItem,
-	QueryEnvelope,
-} from "#/lib/types";
+import { queryKeys } from "#/lib/query-client";
+import type { BlockListResponse } from "#/lib/types";
 import {
 	blockRowBodyClass,
 	blockRowClass,
@@ -35,128 +38,96 @@ export const Route = createFileRoute("/blocks")({
 });
 
 function BlocksRoute() {
-	const [meta, setMeta] = useState<QueryEnvelope | null>(null);
+	const queryClient = useQueryClient();
 	const [accountId, setAccountId] = useState<string>("acct_primary");
 	const [search, setSearch] = useState("");
-	const [items, setItems] = useState<BlockItem[]>([]);
-	const [matches, setMatches] = useState<BlockSearchItem[]>([]);
-	const [refreshTick, setRefreshTick] = useState(0);
 	const [isSubmitting, setIsSubmitting] = useState(false);
-	const [isSyncing, setIsSyncing] = useState(false);
 	const [message, setMessage] = useState("");
-	const [error, setError] = useState("");
+	const [actionError, setActionError] = useState("");
+	const statusQuery = useQuery({
+		queryKey: queryKeys.status,
+		queryFn: ({ signal }) => fetchQueryEnvelope({ signal }),
+	});
+	const meta = statusQuery.data ?? null;
+	const debouncedSearch = useDebouncedValue(search, 180);
 	const hasAccountId = accountId.trim().length > 0;
 	const isReady = Boolean(meta);
-
-	useEffect(() => {
-		const controller = new AbortController();
-
-		fetch("/api/status", { signal: controller.signal })
-			.then((response) => response.json())
-			.then((data: QueryEnvelope) => {
-				setMeta(data);
-				setAccountId(data.accounts[0]?.id ?? "acct_primary");
-				setError("");
-			})
-			.catch((error: unknown) => {
-				if (error instanceof DOMException && error.name === "AbortError") {
-					return;
-				}
-				setError(
-					error instanceof Error
-						? error.message
-						: "Unable to load blocklist status",
-				);
+	const blocksQueryKey = [
+		...queryKeys.blocks,
+		{ accountId, search: debouncedSearch },
+	] as const;
+	const blocksQuery = useQuery({
+		queryKey: blocksQueryKey,
+		enabled: hasAccountId,
+		queryFn: async ({ signal }) => {
+			const params = new URLSearchParams({
+				account: accountId,
+				limit: "12",
 			});
-
-		return () => {
-			controller.abort();
-		};
-	}, []);
-
-	useEffect(() => {
-		const controller = new AbortController();
-		const params = new URLSearchParams({
-			account: accountId,
-			limit: "12",
-			refresh: String(refreshTick),
-		});
-		if (search.trim()) {
-			params.set("search", search.trim());
-		}
-
-		fetch(`/api/blocks?${params.toString()}`, { signal: controller.signal })
-			.then((response) => response.json())
-			.then((data: BlockListResponse) => {
-				setItems(data.items);
-				setMatches(data.matches);
-				setError("");
-			})
-			.catch((error: unknown) => {
-				if (error instanceof DOMException && error.name === "AbortError") {
-					return;
-				}
-				setError(
-					error instanceof Error ? error.message : "Unable to load blocklist",
-				);
+			if (debouncedSearch.trim()) {
+				params.set("search", debouncedSearch.trim());
+			}
+			const response = await fetch(`/api/blocks?${params.toString()}`, {
+				signal,
 			});
-
-		return () => {
-			controller.abort();
-		};
-	}, [accountId, refreshTick, search]);
-
-	useEffect(() => {
-		if (!hasAccountId) {
-			return;
-		}
-
-		const controller = new AbortController();
-		setIsSyncing(true);
-
-		fetch("/api/action", {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({
+			if (!response.ok) {
+				throw new Error(
+					`Blocklist request failed (${String(response.status)})`,
+				);
+			}
+			return (await response.json()) as BlockListResponse;
+		},
+		placeholderData: keepPreviousData,
+		staleTime: 5 * 60_000,
+	});
+	const items = blocksQuery.data?.items ?? [];
+	const matches = blocksQuery.data?.matches ?? [];
+	const blockSyncQuery = useQuery({
+		queryKey: [...queryKeys.blockSync, accountId],
+		enabled: hasAccountId,
+		retry: false,
+		queryFn: async () => {
+			const data = (await postAction({
 				kind: "syncBlocks",
 				accountId,
-			}),
-			signal: controller.signal,
-		})
-			.then((response) => response.json())
-			.then(
-				(data: {
-					ok?: boolean;
-					synced?: boolean;
-					syncedCount?: number;
-					transport?: { ok?: boolean; output?: string };
-				}) => {
-					if (data.ok === false) {
-						setError(data.transport?.output ?? "Block sync failed");
-						return;
-					}
-					setRefreshTick((value) => value + 1);
-					if (data.transport?.output?.includes("disabled")) {
-						return;
-					}
-					setMessage(
-						data.transport?.output ??
-							`Synced ${String(data.syncedCount ?? 0)} remote blocks`,
-					);
-				},
-			)
-			.catch((error: unknown) => {
-				if (error instanceof DOMException && error.name === "AbortError") {
-					return;
-				}
-				setError(error instanceof Error ? error.message : "Block sync failed");
-			})
-			.finally(() => setIsSyncing(false));
+			})) as {
+				ok?: boolean;
+				syncedCount?: number;
+				transport?: { ok?: boolean; output?: string };
+			};
+			if (data.ok === false || data.transport?.ok === false) {
+				throw new Error(data.transport?.output ?? "Block sync failed");
+			}
+			await queryClient.invalidateQueries({ queryKey: queryKeys.blocks });
+			return data;
+		},
+		staleTime: 5 * 60_000,
+	});
+	const isSyncing = blockSyncQuery.isFetching;
+	const queryError =
+		statusQuery.error ?? blocksQuery.error ?? blockSyncQuery.error ?? null;
+	const error =
+		actionError ||
+		(queryError instanceof Error
+			? queryError.message
+			: queryError
+				? "Unable to load blocklist"
+				: "");
 
-		return () => {
-			controller.abort();
-		};
-	}, [accountId, hasAccountId]);
+	useEffect(() => {
+		if (!meta?.accounts.length) return;
+		if (meta.accounts.some((account) => account.id === accountId)) return;
+		setAccountId(meta.accounts[0]?.id ?? "acct_primary");
+	}, [accountId, meta]);
+
+	useEffect(() => {
+		const data = blockSyncQuery.data;
+		if (!data || data.transport?.output?.includes("disabled")) return;
+		setMessage(
+			data.transport?.output ??
+				`Synced ${String(data.syncedCount ?? 0)} remote blocks`,
+		);
+	}, [blockSyncQuery.data]);
 
 	const subtitle = useMemo(() => {
 		if (!meta) {
@@ -177,26 +148,21 @@ function BlocksRoute() {
 		if (!normalized) return;
 
 		setIsSubmitting(true);
-		setError("");
+		setActionError("");
 		setMessage("");
 
 		try {
-			const response = await fetch("/api/action", {
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({
-					kind,
-					accountId,
-					query: normalized,
-				}),
-			});
-			const data = (await response.json()) as {
+			const data = (await postAction({
+				kind,
+				accountId,
+				query: normalized,
+			})) as {
 				ok?: boolean;
 				profile?: { handle?: string };
 				transport?: { ok?: boolean; output?: string };
 			};
 			if (data.ok === false || data.transport?.ok === false) {
-				setError(data.transport?.output ?? "Blocklist action failed");
+				setActionError(data.transport?.output ?? "Blocklist action failed");
 				return;
 			}
 
@@ -205,9 +171,9 @@ function BlocksRoute() {
 					data.profile?.handle ?? normalized.replace(/^@/, "")
 				} · ${data.transport?.output ?? "local"}`,
 			);
-			setRefreshTick((value) => value + 1);
+			await queryClient.invalidateQueries({ queryKey: queryKeys.blocks });
 		} catch (submitError) {
-			setError(
+			setActionError(
 				submitError instanceof Error
 					? submitError.message
 					: "Blocklist action failed",
