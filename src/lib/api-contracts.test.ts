@@ -10,6 +10,7 @@ import {
 	networkMapResponseSchema,
 	profileHydrationResponseSchema,
 	queryResponseSchema,
+	tweetMediaSchema,
 	tweetConversationResponseSchema,
 	webSyncJobSchema,
 	xurlRateLimitSnapshotSchema,
@@ -23,6 +24,21 @@ describe("API contracts", () => {
 		});
 
 		expect(result.success).toBe(true);
+	});
+
+	it("normalizes legacy media types at the API boundary", () => {
+		expect(
+			tweetMediaSchema.parse({
+				url: "https://example.com/photo.jpg",
+				type: "photo",
+			}),
+		).toMatchObject({ type: "image" });
+		expect(
+			tweetMediaSchema.parse({
+				url: "https://example.com/animation.mp4",
+				type: "animated_gif",
+			}),
+		).toMatchObject({ type: "gif" });
 	});
 
 	it("rejects malformed nested query items", () => {

@@ -13,6 +13,7 @@
 ### Fixed
 
 - Derive unauthenticated local API access from the production server peer socket so spoofed host headers cannot bypass remote-access controls.
+- Normalize legacy stored media types at the API boundary so older archives and backups remain readable through typed response contracts.
 
 ## 0.8.3 - 2026-06-15
 

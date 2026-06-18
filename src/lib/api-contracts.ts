@@ -118,7 +118,11 @@ export const tweetEntitiesSchema: z.ZodType<TweetEntities> = z.object({
 
 export const tweetMediaSchema: z.ZodType<TweetMediaItem> = z.object({
 	url: z.string(),
-	type: z.enum(["image", "video", "gif", "unknown"]),
+	type: z.preprocess(
+		(value) =>
+			value === "photo" ? "image" : value === "animated_gif" ? "gif" : value,
+		z.enum(["image", "video", "gif", "unknown"]),
+	),
 	altText: z.string().optional(),
 	width: z.number().optional(),
 	height: z.number().optional(),
