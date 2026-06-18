@@ -2,6 +2,10 @@
 
 ## 0.8.4 - Unreleased
 
+### Changed
+
+- Refresh runtime and development dependencies and resolve esbuild 0.28.1, clearing the active dependency advisory.
+
 ## 0.8.3 - 2026-06-15
 
 ### Changed
