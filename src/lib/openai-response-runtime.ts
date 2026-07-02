@@ -28,6 +28,23 @@ function toError(error: unknown) {
 	return error instanceof Error ? error : new Error(String(error));
 }
 
+const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+
+/**
+ * Resolve the OpenAI-compatible API base URL. Point this at Ollama
+ * (`http://localhost:11434/v1`) or any other OpenAI-compatible server via
+ * `BIRDCLAW_OPENAI_BASE_URL` (falls back to `OPENAI_BASE_URL`). A trailing
+ * slash is trimmed so callers can safely append `/responses` etc.
+ */
+export function resolveOpenAIBaseUrl(
+	getEnv: (name: string) => string | undefined,
+): string {
+	const configured =
+		getEnv("BIRDCLAW_OPENAI_BASE_URL") || getEnv("OPENAI_BASE_URL");
+	const base = configured?.trim() || DEFAULT_OPENAI_BASE_URL;
+	return base.replace(/\/+$/, "");
+}
+
 export function createOpenAIStreamState(): OpenAIStreamState {
 	return {
 		eventBuffer: "",
@@ -225,8 +242,9 @@ export function requestOpenAIResponseEffect({
 		if (!apiKey) {
 			return yield* Effect.fail(new Error("OPENAI_API_KEY is not set"));
 		}
+		const baseUrl = resolveOpenAIBaseUrl(runtime.env);
 		const response = yield* tryPromise(() =>
-			runtime.fetch("https://api.openai.com/v1/responses", {
+			runtime.fetch(`${baseUrl}/responses`, {
 				method: "POST",
 				signal,
 				headers: {
