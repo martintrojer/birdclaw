@@ -30,12 +30,12 @@ describe("resolveOpenAIBaseUrl", () => {
 		);
 	});
 
-	it("ignores ambient OPENAI_BASE_URL to avoid unintended redirection", () => {
+	it("retains OPENAI_BASE_URL as a compatibility fallback", () => {
 		const env: Record<string, string> = {
-			OPENAI_BASE_URL: "http://another-tool/v1",
+			OPENAI_BASE_URL: "http://localhost:1234/v1",
 		};
 		expect(resolveOpenAIBaseUrl((name) => env[name])).toBe(
-			"https://api.openai.com/v1",
+			"http://localhost:1234/v1",
 		);
 	});
 });

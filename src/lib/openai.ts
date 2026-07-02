@@ -75,7 +75,14 @@ export function scoreInboxItemWithOpenAIEffect(
 					],
 				}),
 			}),
-		).pipe(Effect.mapError(toError));
+		).pipe(
+			Effect.mapError(toError),
+			Effect.tapError((error) =>
+				Effect.sync(() =>
+					debugLog(getEnv, `network error for ${url}: ${error.message}`),
+				),
+			),
+		);
 
 		if (!response.ok) {
 			const text = yield* tryPromise(() => response.text()).pipe(
