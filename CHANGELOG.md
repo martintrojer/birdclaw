@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## 0.9.1 - Unreleased
+## 0.9.1 - 2026-07-02
 
 ### Added
 
