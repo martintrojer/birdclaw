@@ -21,22 +21,21 @@ describe("resolveOpenAIBaseUrl", () => {
 		);
 	});
 
-	it("prefers the birdclaw override and trims trailing slashes", () => {
+	it("uses the birdclaw override and trims trailing slashes", () => {
 		const env: Record<string, string> = {
 			BIRDCLAW_OPENAI_BASE_URL: "http://localhost:11434/v1/",
-			OPENAI_BASE_URL: "http://ignored/v1",
 		};
 		expect(resolveOpenAIBaseUrl((name) => env[name])).toBe(
 			"http://localhost:11434/v1",
 		);
 	});
 
-	it("falls back to OPENAI_BASE_URL", () => {
+	it("ignores ambient OPENAI_BASE_URL to avoid unintended redirection", () => {
 		const env: Record<string, string> = {
-			OPENAI_BASE_URL: "http://localhost:1234/v1",
+			OPENAI_BASE_URL: "http://another-tool/v1",
 		};
 		expect(resolveOpenAIBaseUrl((name) => env[name])).toBe(
-			"http://localhost:1234/v1",
+			"https://api.openai.com/v1",
 		);
 	});
 });

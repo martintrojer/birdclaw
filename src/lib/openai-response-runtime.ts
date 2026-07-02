@@ -33,14 +33,16 @@ const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 /**
  * Resolve the OpenAI-compatible API base URL. Point this at Ollama
  * (`http://localhost:11434/v1`) or any other OpenAI-compatible server via
- * `BIRDCLAW_OPENAI_BASE_URL` (falls back to `OPENAI_BASE_URL`). A trailing
+ * the Birdclaw-specific `BIRDCLAW_OPENAI_BASE_URL`. We intentionally do NOT
+ * honor the ambient `OPENAI_BASE_URL` convention: a value another tool
+ * exported in the shell must not silently redirect Birdclaw's API-key-bearing
+ * requests and archive-derived prompts to an unintended endpoint. A trailing
  * slash is trimmed so callers can safely append `/responses` etc.
  */
 export function resolveOpenAIBaseUrl(
 	getEnv: (name: string) => string | undefined,
 ): string {
-	const configured =
-		getEnv("BIRDCLAW_OPENAI_BASE_URL") || getEnv("OPENAI_BASE_URL");
+	const configured = getEnv("BIRDCLAW_OPENAI_BASE_URL");
 	const base = configured?.trim() || DEFAULT_OPENAI_BASE_URL;
 	return base.replace(/\/+$/, "");
 }
