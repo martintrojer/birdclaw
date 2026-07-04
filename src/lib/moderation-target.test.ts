@@ -14,27 +14,15 @@ const mocks = vi.hoisted(() => ({
 	lookupUsersByIds: vi.fn(),
 }));
 
-vi.mock("./bird-actions", () => {
-	const fromMock =
-		(mock: (...args: unknown[]) => PromiseLike<unknown>) =>
-		(...args: unknown[]) =>
-			Effect.tryPromise({
-				try: () => mock(...args),
-				catch: (error) => error,
-			});
+vi.mock("./bird-actions", async () => {
+	const { effectFromMock: fromMock } = await import("../test/effect-mocks");
 	return {
 		lookupProfileViaBirdEffect: fromMock(mocks.lookupProfileViaBird),
 	};
 });
 
-vi.mock("./xurl", () => {
-	const fromMock =
-		(mock: (...args: unknown[]) => PromiseLike<unknown>) =>
-		(...args: unknown[]) =>
-			Effect.tryPromise({
-				try: () => mock(...args),
-				catch: (error) => error,
-			});
+vi.mock("./xurl", async () => {
+	const { effectFromMock: fromMock } = await import("../test/effect-mocks");
 	return {
 		lookupAuthenticatedUserEffect: fromMock(mocks.lookupAuthenticatedUser),
 		lookupUsersByHandlesEffect: fromMock(mocks.lookupUsersByHandles),

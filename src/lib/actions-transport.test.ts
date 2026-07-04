@@ -18,14 +18,8 @@ const mocks = vi.hoisted(() => ({
 	lookupAuthenticatedUser: vi.fn(),
 }));
 
-vi.mock("./bird-actions", () => {
-	const fromMock =
-		(mock: (...args: unknown[]) => PromiseLike<unknown>) =>
-		(...args: unknown[]) =>
-			Effect.tryPromise({
-				try: () => mock(...args),
-				catch: (error) => error,
-			});
+vi.mock("./bird-actions", async () => {
+	const { effectFromMock: fromMock } = await import("../test/effect-mocks");
 	return {
 		blockUserViaBirdEffect: fromMock(mocks.blockUserViaBird),
 		unblockUserViaBirdEffect: fromMock(mocks.unblockUserViaBird),
@@ -35,14 +29,8 @@ vi.mock("./bird-actions", () => {
 	};
 });
 
-vi.mock("./xurl", () => {
-	const fromMock =
-		(mock: (...args: unknown[]) => PromiseLike<unknown>) =>
-		(...args: unknown[]) =>
-			Effect.tryPromise({
-				try: () => mock(...args),
-				catch: (error) => error,
-			});
+vi.mock("./xurl", async () => {
+	const { effectFromMock: fromMock } = await import("../test/effect-mocks");
 	return {
 		blockUserViaXurlEffect: fromMock(mocks.blockUserViaXurl),
 		unblockUserViaXurlEffect: fromMock(mocks.unblockUserViaXurl),

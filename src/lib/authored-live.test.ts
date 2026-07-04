@@ -15,14 +15,8 @@ const mocks = vi.hoisted(() => ({
 	lookupAuthenticatedUser: vi.fn(),
 }));
 
-vi.mock("./xurl", () => {
-	const fromMock =
-		(mock: (...args: unknown[]) => PromiseLike<unknown>) =>
-		(...args: unknown[]) =>
-			Effect.tryPromise({
-				try: () => mock(...args),
-				catch: (error) => error,
-			});
+vi.mock("./xurl", async () => {
+	const { effectFromMock: fromMock } = await import("../test/effect-mocks");
 	return {
 		getTransportStatusEffect: fromMock(mocks.getTransportStatus),
 		listUserTweetsEffect: fromMock(mocks.listUserTweets),
